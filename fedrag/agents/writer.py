@@ -13,14 +13,21 @@ EVIDENCE_CHARS = 1800
 
 
 def select_evidence(results: list[AgentResult], store: EvidenceStore) -> list[str]:
-    """Evidence the writer sees: everything the agents cited, then their top unsighted results."""
+    """Evidence the writer sees: what the agents cited, taken round-robin so every agent is represented
+    within the budget, then the first few items seen by agents that cited little."""
+    queues = [[i for i in r.evidence_ids if store.get(i)] for r in results]
     ids: list[str] = []
+    while any(queues) and len(ids) < MAX_EVIDENCE_ITEMS:
+        for q in queues:
+            while q:
+                i = q.pop(0)
+                if i not in ids:
+                    ids.append(i)
+                    break
     for r in results:
-        ids += [i for i in r.evidence_ids if i not in ids]
-    for r in results:  # agents that cited little: add the first few items they looked at
-        extra = [i for i in r.seen_ids if i not in ids][: max(0, 4 - len(r.evidence_ids))]
+        extra = [i for i in r.seen_ids if i not in ids and store.get(i)][: max(0, 4 - len(r.evidence_ids))]
         ids += extra
-    return [i for i in ids if store.get(i)][:MAX_EVIDENCE_ITEMS]
+    return ids[:MAX_EVIDENCE_ITEMS]
 
 
 def _findings_block(results: list[AgentResult]) -> str:

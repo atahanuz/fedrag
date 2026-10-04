@@ -155,3 +155,17 @@ def test_fed_tools_offline():
     assert "fed_fomc_minutes_2026-07-29" in out
     out = run(read_document_pages(ctx, "fed_stress_test_results_2026", 19))
     assert out.startswith("[D1]") and "First Citizens | 6.7" in out
+
+
+def test_writer_evidence_is_shared_fairly_between_agents():
+    from fedrag.agents.base import AgentResult
+    from fedrag.agents.writer import MAX_EVIDENCE_ITEMS, select_evidence
+
+    store = EvidenceStore()
+    for i in range(40):
+        store.add_web(f"https://example.org/{i}", "t", "x")
+    verbose = AgentResult(agent="fed_research", task_id="t1", task="", answer="",
+                          evidence_ids=[f"W{i}" for i in range(1, 31)])
+    brief = AgentResult(agent="market_data", task_id="t2", task="", answer="", evidence_ids=["W35", "W36"])
+    sel = select_evidence([verbose, brief], store)
+    assert len(sel) == MAX_EVIDENCE_ITEMS and {"W35", "W36"} <= set(sel)

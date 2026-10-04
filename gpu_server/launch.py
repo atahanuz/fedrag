@@ -76,7 +76,8 @@ def start_gateway(key: str) -> None:
         return
     if not _running("uvicorn gateway:app"):
         _spawn("gateway", [sys.executable, "-m", "uvicorn", "gateway:app", "--host", "0.0.0.0", "--port", "8000",
-                           "--log-level", "warning"], env={"FEDRAG_API_KEY": key})
+                           "--log-level", "warning"],
+               env={"FEDRAG_API_KEY": key, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"})
     # embedder + reranker must be resident before vLLM sizes its KV cache
     for _ in range(180):
         if _get("http://127.0.0.1:8000/health") == 200:
@@ -153,12 +154,16 @@ def status(heal: bool = False) -> dict:
         key = api_key()
         if not out["gateway"]:
             start_gateway(key)
+            out["gateway"] = True
+            out["tunnel_ok"] = _health_json(out["url"] + "/health", timeout=15) is not None if "url" in out else None
         if not out["vllm"] and not out["vllm_process"]:
             start_vllm()
+        # Only a tunnel that cannot reach a healthy local gateway is broken (restarting changes the URL).
         if not out["tunnel_process"] or out.get("tunnel_ok") is False:
             subprocess.run(["pkill", "-f", TUNNEL_PATTERN])
             time.sleep(2)
             out["url"] = start_tunnel(key)
+            out["tunnel_ok"] = True
             out["tunnel_restarted"] = True
     try:
         smi = subprocess.run(["nvidia-smi", "--query-gpu=memory.used,memory.total,utilization.gpu",

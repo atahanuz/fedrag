@@ -185,8 +185,13 @@ class LLM:
                 args, err = {}, f"could not parse arguments as JSON: {e}"
             calls.append(ToolCall(id=tc.id or f"call_{len(calls)}", name=tc.function.name, arguments=args,
                                   raw_arguments=raw, parse_error=err))
+        content = (msg.content or "").strip()
+        if not thinking and not content and not calls and reasoning:
+            # With thinking disabled the reasoning parser occasionally files the whole reply under
+            # "reasoning", leaving content empty: it is the answer.
+            content, reasoning = reasoning.strip(), None
         out = LLMResponse(
-            content=(msg.content or "").strip(),
+            content=content,
             tool_calls=calls,
             reasoning=reasoning,
             finish_reason=choice.finish_reason,

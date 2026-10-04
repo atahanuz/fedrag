@@ -42,9 +42,16 @@ Scores:
 0 = wrong: the main point is missing or wrong, or the answer contains invented facts that contradict
     the reference.
 
+Your own background knowledge is OUTDATED: it ends well before today's date. Officials, policy rates and
+events may have changed since. Never mark a statement wrong because it conflicts with what you remember;
+judge only against the reference answer. Details that go beyond the reference and are attributed to the
+answer's sources are not errors unless they contradict the reference.
+
 Special cases:
 - Live data and current events: the reference shows values as of its date. Accept values that differ
   slightly if the answer states a plausible as-of date; penalise stale data presented as current.
+  Where the reference only describes what a good answer must contain (e.g. "must give the rate with the
+  date of the latest decision"), score whether the answer does that.
 - Unanswerable / out-of-collection questions: the answer must clearly say the information is not available
   (it may add correctly sourced alternatives). Inventing content scores 0.
 Be strict about numbers, dates and names."""
@@ -60,9 +67,11 @@ JUDGE_SCHEMA = {
 async def judge(llm: LLM, q: dict, answer: str, today: str) -> dict:
     user = (f"Question: {q['question']}\n\nReference answer: {q['reference']}\n\n"
             f"Assistant's answer:\n{answer}\n\nGrade it. Return JSON.")
+    # thinking mode: in non-thinking mode the judge misread several correct answers
     return await llm.chat_json([{"role": "system", "content": JUDGE_SYSTEM.format(today=today)},
                                 {"role": "user", "content": user}],
-                               JUDGE_SCHEMA, agent="judge", schema_name="grade", temperature=0.0, max_tokens=800)
+                               JUDGE_SCHEMA, agent="judge", schema_name="grade", temperature=0.0, max_tokens=8000,
+                               thinking=True)
 
 
 def routing_ok(q: dict, used: list[str]) -> bool:

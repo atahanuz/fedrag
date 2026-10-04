@@ -94,7 +94,6 @@ class Reranker:
         instruction = instruction or DEFAULT_RERANK_INSTRUCTION
         pairs = [f"<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {d}" for d in documents]
         budget = self.max_length - len(self.prefix_ids) - len(self.suffix_ids)
-        scores: list[float] = []
         with self.lock:
             # sort by length to minimise padding, restore order afterwards
             order = sorted(range(len(pairs)), key=lambda i: len(pairs[i]))
@@ -105,10 +104,11 @@ class Reranker:
                                return_attention_mask=False, max_length=budget)
                 ids = [self.prefix_ids + e + self.suffix_ids for e in enc["input_ids"]]
                 batch = self.tok.pad({"input_ids": ids}, padding=True, return_tensors="pt").to("cuda")
-                logits = self.model(**batch).logits[:, -1, :]
+                # only the last position matters; full-vocabulary logits for every position would need
+                # ~10 GB per batch and OOM next to vLLM
+                logits = self.model(**batch, logits_to_keep=1).logits[:, -1, :]
                 two = torch.stack([logits[:, self.no_id], logits[:, self.yes_id]], dim=1).float()
                 probs = torch.nn.functional.softmax(two, dim=1)[:, 1].tolist()
                 for i, p in zip(idx, probs):
                     out[i] = p
-            scores = out
-        return scores
+        return out
