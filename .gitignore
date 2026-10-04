@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets / local config
+.env
+*.token
+
+# Large source documents (public-domain PDFs; re-download via metadata.csv urls)
+federal_reserve/*.pdf
+
+# Generated artifacts (rebuild with `python -m fedrag.ingest.build_corpus` + gpu_server/embed_corpus.py)
+data/
+eval/results/*.jsonl
+eval/results/*.json
+!eval/results/.gitkeep
+
+# Scratch
+*.log
