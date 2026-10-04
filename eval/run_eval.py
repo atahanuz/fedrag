@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fedrag.llm import LLM  # noqa: E402
 from fedrag.orchestrator import Orchestrator  # noqa: E402
+from fedrag.retrieval.text_format import citation_label  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 TOOL_AGENTS = {"fed_research", "web_research", "market_data"}
@@ -104,16 +105,45 @@ async def run_one(orch: Orchestrator, q: dict, sem: asyncio.Semaphore, today: dt
         return rec
 
 
+NAIVE_PROMPT = """Answer the question using the context passages from Federal Reserve publications.
+Cite passages as [1], [2]. If the context does not contain the answer, say so. Today's date is {today}.
+
+Context:
+{context}
+
+Question: {question}"""
+
+
+async def run_naive(orch: Orchestrator, q: dict, sem: asyncio.Semaphore, today: dt.date) -> dict:
+    """Baseline: one hybrid retrieval over the documents + one LLM call. No routing, tools or agents."""
+    async with sem:
+        t0 = time.time()
+        hits = await orch.index.search(q["question"], k=8)
+        context = "\n\n".join(f"[{i + 1}] {citation_label(h.chunk)}\n{h.chunk['text']}" for i, h in enumerate(hits))
+        r = await orch.llm.chat([{"role": "user", "content": NAIVE_PROMPT.format(
+            today=today.strftime("%B %d, %Y"), context=context, question=q["question"])}],
+            agent="naive", temperature=0.3, max_tokens=1500)
+        rec = {"id": q["id"], "category": q["category"], "question": q["question"], "answer": r.content,
+               "agents_used": ["naive"], "plan": {}, "sources": [{"id": str(i + 1), "kind": "doc",
+                                                                   "source": citation_label(h.chunk), "url": None}
+                                                                  for i, h in enumerate(hits)],
+               "verifications": [], "usage": {"llm_calls": 1, "tool_calls": {}}, "seconds": round(time.time() - t0, 1),
+               "trace": [], "error": None}
+        print(f"  {q['id']:<5} {rec['seconds']:>6.1f}s naive", flush=True)
+        return rec
+
+
 def summarize(records: list[dict]) -> dict:
     by_cat: dict[str, list[dict]] = defaultdict(list)
     for r in records:
         by_cat[r["category"]].append(r)
 
     def agg(rs: list[dict]) -> dict:
-        tool_rs = [r for r in rs if set(r["agents_used"]) & TOOL_AGENTS]
+        tool_rs = [r for r in rs if set(r["agents_used"]) & (TOOL_AGENTS | {"naive"})]
         return {
             "n": len(rs),
-            "routing_acc": round(sum(r["routing_ok"] for r in rs) / len(rs), 3),
+            "routing_acc": (round(sum(r["routing_ok"] for r in rs) / len(rs), 3)
+                            if all(r["routing_ok"] is not None for r in rs) else None),
             "correct_rate": round(sum(r["score"] == 2 for r in rs) / len(rs), 3),
             "mean_score": round(sum(r["score"] for r in rs) / len(rs) / 2, 3),
             "cited_rate": round(sum(bool(r["sources"]) for r in tool_rs) / len(tool_rs), 3) if tool_rs else None,
@@ -131,7 +161,8 @@ def print_table(summary: dict) -> None:
     rows = list(summary["by_category"].items()) + [("OVERALL", summary["overall"])]
     for c, a in rows:
         cited = f"{a['cited_rate']:.2f}" if a["cited_rate"] is not None else "-"
-        print(f"{c:<20}{a['n']:>4}{a['routing_acc']:>9.2f}{a['correct_rate']:>9.2f}{a['mean_score']:>8.2f}"
+        routing = f"{a['routing_acc']:.2f}" if a["routing_acc"] is not None else "-"
+        print(f"{c:<20}{a['n']:>4}{routing:>9}{a['correct_rate']:>9.2f}{a['mean_score']:>8.2f}"
               f"{cited:>8}{a['median_seconds']:>8.1f}{a['mean_llm_calls']:>6.1f}{a['mean_tool_calls']:>7.1f}")
 
 
@@ -143,6 +174,7 @@ async def main() -> None:
     ap.add_argument("--no-verify", action="store_true")
     ap.add_argument("--thinking", action="store_true", help="enable the LLM's thinking mode for specialist agents")
     ap.add_argument("--rescore", help="re-judge answers from a saved results file")
+    ap.add_argument("--naive", action="store_true", help="naive RAG baseline: one retrieval + one LLM call")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
 
@@ -164,7 +196,8 @@ async def main() -> None:
         print(f"running {len(questions)} questions (concurrency {args.concurrency})")
         sem = asyncio.Semaphore(args.concurrency)
         t0 = time.time()
-        records = await asyncio.gather(*(run_one(orch, q, sem, today) for q in questions))
+        runner = run_naive if args.naive else run_one
+        records = await asyncio.gather(*(runner(orch, q, sem, today) for q in questions))
         print(f"wall time {time.time() - t0:.0f}s")
 
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -189,14 +222,14 @@ async def main() -> None:
         q = qmap[r["id"]]
         r["score"] = g.get("score", 0) if not r.get("error") else 0
         r["judge"] = g.get("explanation", "")
-        r["routing_ok"] = routing_ok(q, r["agents_used"])
+        r["routing_ok"] = None if r["agents_used"] == ["naive"] else routing_ok(q, r["agents_used"])
     save()
     summary = summarize(records)
     json.dump(summary, open(out.with_suffix(".summary.json"), "w"), indent=2)
     print_table(summary)
     print("\nper question:")
     for r in sorted(records, key=lambda r: r["id"]):
-        flag = "" if r["routing_ok"] else "  [routing]"
+        flag = "  [routing]" if r["routing_ok"] is False else ""
         print(f"  {r['id']:<5} score={r['score']} {r['seconds']:>5.1f}s{flag}  {r['judge'][:150]}")
     print(f"\nsaved {out}")
 

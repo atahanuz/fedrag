@@ -42,7 +42,8 @@ flowchart LR
    may call several tools at once; they run concurrently. The agent finishes by calling
    `submit_findings` (answer, cited key facts, confidence, gaps).
    - `fed_research`: `search_fed_documents` (hybrid search with type, date and document filters),
-     `list_fed_documents` (resolves "latest", "the June meeting" and so on), `get_document_outline`,
+     `find_documents` (which documents discuss a topic), `list_fed_documents` (resolves "latest", "the
+     June meeting" and so on), `get_document_outline`,
      `read_document_pages` (whole pages and tables), `expand_context` (neighbouring passages), `calculator`.
    - `web_research`: `web_search` (DuckDuckGo, with news and recency filters), `fetch_webpage`
      (HTML or PDF, query-focused extraction), `calculator`.
@@ -79,7 +80,7 @@ flowchart LR
 | --- | --- | --- |
 | LLM for every agent | `Qwen/Qwen3.8-27B-FP8` via vLLM 0.30 | tool calling (`qwen3_xml` parser), JSON-schema output, MTP speculative decoding, about 95 tok/s per stream, 64K context, thinking mode off |
 | Embeddings | `Qwen/Qwen3-Embedding-8B` | corpus embedded once on the GPU (about 6 min); queries use an instruction prefix |
-| Reranker | `Qwen/Qwen3-Reranker-4B` | P("yes") relevance; about 0.2 s for 40 passages |
+| Reranker | `Qwen/Qwen3-Reranker-4B` | P("yes") relevance; about 2 s for 40 passages |
 
 Qwen3.8-27B was chosen because it was the strongest instruction-following and agentic model that fits
 in 80GB next to the retrieval models (IFBench 79.5, Terminal-Bench 73). FP8 weights run on the A100
@@ -102,10 +103,18 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[ui
 .venv/bin/python -m fedrag status             # gateway, LLM and index check
 ```
 
-`scripts/colab_up.py --stop` releases the VM. Colab reclaims a VM about 20 minutes after the last
-kernel execution, even while the servers in the background are busy, so `colab_up.py` keeps running a
-tiny status cell every 4 minutes. It also repairs a dropped tunnel and updates `.env` with the new URL.
-It stops after 60 minutes without gateway requests, and Colab then releases the VM.
+`scripts/colab_up.py --stop` releases the VM. `colab_up.py` also works around two Colab behaviours:
+
+- Colab reclaims a VM about 20 minutes after the last kernel execution, even while the servers in the
+  background are busy. The keep-alive loop therefore runs a tiny status cell every 4 minutes. It stops
+  after 60 minutes without gateway requests, and Colab then releases the VM.
+- `colab-cli` 0.6.0 never refreshes its runtime-proxy token, which expires after about an hour. The
+  next `exec` gets a 401, and the CLI deletes the session record and kills its keep-alive daemon,
+  although the VM is still running (`colab sessions` shows it as `[?]`). The loop refreshes the token on
+  every heartbeat through the CLI's own state API, and re-adopts such orphans.
+
+The loop also repairs a dropped tunnel and updates `.env` with the new URL.
+`python scripts/colab_up.py --keepalive-only` restarts just the loop.
 
 ## Usage
 
@@ -120,21 +129,26 @@ It stops after 60 minutes without gateway requests, and Colab then releases the 
 The web UI streams every agent as a collapsible panel listing its tool calls and findings, and links each
 citation to its source.
 
-Example CLI trace:
+Real CLI trace (abridged): three agents run in parallel, each making several tool calls.
 
 ```
-     planner    6.1s intent=mixed tasks=3 — three parts: September decision (after the collection) ...
-                     • web_research t1: Find the outcome of the September 2026 FOMC meeting ...
-                     • market_data t2: Retrieve the current fed funds target range (DFEDTARL/DFEDTARU) ...
-                     • fed_research t3: July 28-29, 2026 FOMC minutes: target range and vote ...
-web_research    6.1s ▶ Find the outcome of the September 2026 FOMC meeting ...
- market_data    6.1s ▶ Retrieve the current fed funds target range ...
-fed_research    6.1s ▶ July 28-29, 2026 FOMC minutes: target range and vote ...
- market_data    7.9s   ↳ get_economic_series({"series_id": "DFEDTARU", "start_date": "2026-06-01"})
-fed_research    8.0s   ↳ list_fed_documents({"doc_type": "meeting_minutes", "date_from": "2026-07-01"})
-web_research    8.2s   ↳ web_search({"query": "FOMC September 2026 decision", "news": true})
-...
-    verifier   58.3s verdict=accept
+     planner    6.7s intent=mixed tasks=3 — The question has two parts: (1) the outcome of the September 2026
+                     FOMC meeting, which is after the local collection's last minutes ...
+                     • web_research t1: Find the outcome of the Federal Reserve's September 2026 FOMC meeting ...
+                     • market_data t2: Retrieve the current federal funds target range using FRED series DFEDTARL ...
+                     • fed_research t3: In the FOMC minutes for the July 28-29, 2026 meeting, find the target range ...
+web_research   10.0s   ↳ web_search({"query": "Federal Reserve FOMC September 2026 meeting federal funds rate decision", ...})
+fed_research   10.6s   ↳ search_fed_documents({"query": "federal funds rate target range decision", "doc_types": ["meeting_minutes"], ...})
+fed_research   10.7s   ↳ list_fed_documents({"doc_type": "meeting_minutes", "date_from": "2026-07-29", "date_to": "2026-07-29"})
+ market_data   10.9s   ↳ get_economic_series({"series_id": "DFEDTARL"})
+ market_data   10.9s   ↳ get_economic_series({"series_id": "DFEDTARU"})
+ market_data   20.2s   ↳ get_economic_series({"series_id": "DFEDTARU", "start_date": "2026-09-14", "end_date": "2026-09-22"})
+web_research   20.3s   ↳ fetch_webpage({"url": "https://www.federalreserve.gov/monetarypolicy/fomcpresconf20260916.htm", ...})
+fed_research   21.7s ✔ confidence=high evidence=4 steps=2 tools=2
+ market_data   28.7s ✔ confidence=high evidence=8 steps=4 tools=8
+web_research   33.0s ✔ confidence=high evidence=10 steps=4 tools=5
+ synthesizer   33.0s ▶ write the cited answer
+    verifier   ...   verdict=accept
 ```
 
 ## Evaluation
@@ -147,7 +161,43 @@ documents, from live data on 2026-10-04, or from the web. `eval/run_eval.py` sco
 - **grounding:** the share of tool-based answers that carry citations;
 - **cost:** latency, LLM calls and tool calls.
 
-RESULTS_PLACEHOLDER
+### Results (final run, 2026-10-04)
+
+The agentic system is compared with a **naive RAG baseline** that uses the same retrieval stack (hybrid
+search and reranker) and the same LLM, but makes one retrieval and one LLM call (`run_eval.py --naive`):
+
+| Category | n | Routing | Fully correct: agentic | Fully correct: naive RAG | Median latency* | LLM calls / tool calls |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Fed documents, single fact | 10 | 100% | **90%** | 90% | 64 s | 7.0 / 4.4 |
+| Fed documents, multi-document comparison | 4 | 100% | **100%** | 25% | 107 s | 13.8 / 9.5 |
+| Live data (FX, FRED, prices) | 4 | 100% | **100%** | 0% | 29 s | 6.0 / 2.2 |
+| Web / current events | 4 | 100% | **100%** | 0% | 53 s | 7.0 / 4.5 |
+| Mixed (documents + web/data) | 4 | 100% | **100%** | 0% | 108 s | 9.8 / 8.2 |
+| General knowledge / chit-chat | 4 | 100% | **100%** | 50% | 7 s | 2.0 / 0.0 |
+| Outside the collection | 2 | 100% | **100%** | 0% | 89 s | 12.0 / 9.5 |
+| **Overall** | **32** | **100%** | **97%** (mean score 0.98) | 38% (0.47) | 60 s | 7.8 / 5.0 |
+
+\*Measured with 4 questions running at once on one A100. A single question on its own usually takes
+20–40 s (documents), 10–30 s (live data), 35–65 s (mixed) or 3–10 s (general knowledge). Every
+tool-based answer carried citations. The answers, judge verdicts and full agent traces of both runs are in
+`eval/results/final_agentic.jsonl` and `eval/results/final_naive_rag.jsonl`.
+
+What the numbers show:
+
+- Naive RAG does well on single-fact lookups because the retrieval is strong. It fails as soon as a
+  question needs several documents (dissents across five FOMC meetings), live numbers, events after the
+  collection ends, or no retrieval at all. It names Jerome Powell as the current chair and gives the 2024
+  fed funds range as current; it also refuses "What is the capital of Australia?" because the context
+  doesn't contain it.
+- Every answer in the final run was also checked by hand. All 32 have the correct main answer; the
+  single partial score (`fd06`) left out one of four points in the reference. In one comparison answer the agents also
+  noticed that the 2026 stress-test report restates the 2025 projected minimum as 11.5% (the 2025 report
+  says 11.6%), and reported both.
+- Earlier runs showed that the LLM judge "corrects" 2026 facts with its outdated training knowledge (for
+  example insisting Powell is chair). The judge prompt now says its knowledge is outdated, and judging
+  runs in thinking mode.
+
+The development history, including the regressions found and fixed, is in the git log.
 
 ```bash
 .venv/bin/python eval/run_eval.py -c 4              # all questions
@@ -191,5 +241,5 @@ federal_reserve/ the source PDFs (not in git; metadata.csv lists their URLs)
 - Web pages that block bots (paywalls, Wikipedia without `FEDRAG_HTTP_CONTACT`) cannot be fetched. The
   web agent then relies on search snippets and other sources.
 - FRED data and ECB rates have publication lags; the data agent reports as-of dates.
-- The LLM judge is the same model as the agents, so its scores are a guide; the per-question outputs in
-  `eval/results/` are meant to be read.
+- The LLM judge is the same model as the agents, so its scores are a guide; read the per-question
+  outputs in `eval/results/final_*.jsonl` as well.

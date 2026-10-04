@@ -25,6 +25,8 @@ data/
 eval/results/*.jsonl
 eval/results/*.json
 !eval/results/.gitkeep
+!eval/results/final_*.jsonl
+!eval/results/final_*.summary.json
 
 # Scratch
 *.log

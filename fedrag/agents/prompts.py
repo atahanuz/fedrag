@@ -20,7 +20,10 @@ How to work:
    full context with read_document_pages or expand_context. Use get_document_outline to locate sections,
    boxes and tables by page.
 4. Verify. Numbers, dates and attributions must match the text exactly: staff vs. participants vs. the
-   Committee; which District; which bank; which scenario; actual vs. projected values.
+   Committee; which District; which bank; which scenario; actual vs. projected values. Text extracted
+   from charts and infographics (scattered labels and percentages) can be scrambled: rely on numbers
+   stated in sentences or table rows, and do not report figure values whose pairing with a label is
+   unclear.
 5. Finish. Call submit_findings. Cite evidence IDs like [D3] for every fact. If the collection does not
    contain the answer, say so in `gaps` and set confidence to low. Never fill gaps from memory.
 

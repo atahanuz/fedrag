@@ -184,8 +184,7 @@ def build_app(orch: Orchestrator) -> gr.Blocks:
         chat = list(chat or []) + [gr.ChatMessage(role="user", content=message)]
         view = TraceView()
         queue: asyncio.Queue[Event] = asyncio.Queue()
-        orch.verify_enabled = verify
-        task = asyncio.create_task(orch.run(message, history=turns, listeners=[queue.put_nowait]))
+        task = asyncio.create_task(orch.run(message, history=turns, listeners=[queue.put_nowait], verify=verify))
         yield chat, turns, gr.update(), gr.update(), ""
         while not task.done() or not queue.empty():
             try:

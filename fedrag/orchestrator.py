@@ -80,16 +80,18 @@ class Orchestrator:
     # ------------------------------------------------------------------ main entry
     async def run(self, question: str, history: list[dict] | None = None,
                   listeners: list[Callable[[Event], None]] | None = None,
-                  today: dt.date | None = None) -> RunResult:
+                  today: dt.date | None = None, verify: bool | None = None) -> RunResult:
+        """``verify`` overrides the instance default for this run only."""
         t0 = time.time()
         usage = Usage()
         token = run_usage.set(usage)
         try:
-            return await self._run(question, history, listeners or [], today or dt.date.today(), usage, t0)
+            return await self._run(question, history, listeners or [], today or dt.date.today(), usage, t0,
+                                   self.verify_enabled if verify is None else verify)
         finally:
             run_usage.reset(token)
 
-    async def _run(self, question, history, listeners, today, usage, t0) -> RunResult:
+    async def _run(self, question, history, listeners, today, usage, t0, verify_enabled) -> RunResult:
         trace = Trace()
         trace.listeners.extend(listeners)
         ctx = RunContext(index=self.index, llm=self.llm, evidence=EvidenceStore(), trace=trace, today=today)
@@ -125,18 +127,18 @@ class Orchestrator:
 
             verifications: list[dict] = []
             rounds = 0
-            while self.verify_enabled and len(verifications) < 3:
+            while verify_enabled and len(verifications) < 3:
                 trace.emit("verifier", "agent_start", task="fact-check the draft")
                 v = await verify(self.llm, question, today_s, draft, ctx.evidence)
                 verifications.append(v)
                 trace.emit("verifier", "verification", **v)
                 if v["verdict"] == "accept":
                     break
-                if v["verdict"] == "research" and rounds < self.max_research_rounds and v["follow_up_tasks"]:
+                follow = [Task(id=f"r{rounds + 1}-{i + 1}", agent=t["agent"], instruction=t["instruction"])
+                          for i, t in enumerate(v["follow_up_tasks"][:2])
+                          if t.get("agent") in specialists and t.get("instruction")]
+                if v["verdict"] == "research" and rounds < self.max_research_rounds and follow:
                     rounds += 1
-                    follow = [Task(id=f"r{rounds}-{i + 1}", agent=t["agent"], instruction=t["instruction"])
-                              for i, t in enumerate(v["follow_up_tasks"][:2])
-                              if t.get("agent") in specialists and t.get("instruction")]
                     results += await self._execute(ctx, follow, specialists)
                     trace.emit("synthesizer", "agent_start", task="rewrite with the new findings")
                     draft = await synthesize(self.llm, question, today_s, results, ctx.evidence, history_note,

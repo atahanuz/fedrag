@@ -13,6 +13,12 @@ Colab reclaims a VM roughly 20 minutes after the last kernel execution, even whi
 are busy. The keep-alive loop therefore runs a tiny status cell every few minutes, but only while the
 gateway is actually being used: after ``--idle-minutes`` without requests it stops, and Colab releases
 the VM.
+
+The CLI (0.6.0) also never refreshes its runtime-proxy token, which expires after about an hour; the next
+``colab exec`` then gets a 401, and the CLI deletes the session record and kills its keep-alive daemon
+while the VM keeps running (an orphan, shown as ``[?]`` by ``colab sessions``). ``refresh_session``
+re-adopts the assignment with a fresh token from the assignment listing; the keep-alive loop calls it
+on every heartbeat so the token never expires.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -41,6 +48,72 @@ def colab(*args: str, env: dict | None = None, timeout: int = 900, check: bool =
     return out
 
 
+_REFRESH = r"""
+import json, os, sys
+from colab_cli.commands.session import spawn_keep_alive
+from colab_cli.common import State
+from colab_cli.state import SessionState
+
+session = sys.argv[1]
+st = State()
+local = st.store.list()
+assignments = st.client.list_assignments()
+existing = st.store.get(session)
+if existing is not None:
+    target = next((a for a in assignments if a.endpoint == existing.endpoint), None)
+else:  # adopt the single orphan (an assignment no local record points to)
+    known = {s.endpoint for s in local.values()}
+    orphans = [a for a in assignments if a.endpoint not in known]
+    target = orphans[0] if len(orphans) == 1 else None
+if target is None:
+    print(json.dumps({"ok": False}))
+    sys.exit(0)
+rec = SessionState(
+    name=session, token=target.runtime_proxy_info.token, url=target.runtime_proxy_info.url,
+    endpoint=target.endpoint, variant=target.variant.name, accelerator=target.accelerator.value,
+    kernel_id=existing.kernel_id if existing else None, session_id=existing.session_id if existing else None,
+    keep_alive_pid=existing.keep_alive_pid if existing else None,
+)
+alive = False
+if rec.keep_alive_pid:
+    try:
+        os.kill(rec.keep_alive_pid, 0)
+        alive = True
+    except OSError:
+        pass
+st.store.add(rec)
+if not alive:
+    rec.keep_alive_pid = spawn_keep_alive(target.endpoint, session, auth_provider=st.auth_provider,
+                                          config_path=st.config_path)
+    st.store.add(rec)
+print(json.dumps({"ok": True, "adopted": existing is None, "endpoint": target.endpoint}))
+"""
+
+
+def _colab_python() -> str:
+    """The interpreter that runs the `colab` executable (where the patched colab_cli is installed)."""
+    exe = shutil.which("colab")
+    if exe:
+        first = open(exe, "rb").readline().decode(errors="replace").strip()
+        if first.startswith("#!") and "python" in first:
+            return first[2:].strip().split()[0]
+    return sys.executable
+
+
+def refresh_session(session: str) -> bool:
+    """Give the CLI's record for ``session`` a fresh runtime-proxy token, re-adopting the assignment if
+    the CLI dropped it, and make sure its keep-alive daemon runs. Uses the CLI's own state API."""
+    p = subprocess.run([_colab_python(), "-c", _REFRESH, session], capture_output=True, text=True, timeout=120)
+    m = re.search(r"\{.*\}", p.stdout)
+    if not m:
+        print(f"  session refresh failed: {(p.stderr or p.stdout)[-300:]}")
+        return False
+    res = json.loads(m.group(0))
+    if res.get("adopted"):
+        print(f"re-adopted orphaned assignment {res['endpoint']} as session {session}")
+    return bool(res.get("ok"))
+
+
 def vm_exec(session: str, code: str, timeout: int = 600, retries: int = 3) -> str:
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(code)
@@ -53,6 +126,8 @@ def vm_exec(session: str, code: str, timeout: int = 600, retries: int = 3) -> st
                 if attempt == retries - 1:
                     raise
                 print(f"  exec retry ({str(e)[:120]})")
+                if "appears to be lost" in str(e):
+                    refresh_session(session)  # expired proxy token, not a dead VM
                 time.sleep(10)  # first exec after READY may time out while the kernel boots
     finally:
         os.unlink(path)
@@ -64,7 +139,7 @@ def session_exists(session: str) -> bool:
 
 
 def ensure_session(session: str) -> None:
-    if session_exists(session):
+    if session_exists(session) or refresh_session(session):
         print(f"reusing session {session}")
         return
     print(f"creating high-RAM A100 session {session} ...")
@@ -165,9 +240,12 @@ def keepalive(session: str, interval_s: int, idle_minutes: int) -> None:
     url = None
     while True:
         try:
+            if not refresh_session(session):  # keeps the proxy token fresh (it expires after ~1 hour)
+                print("session is gone; exiting keep-alive (run colab_up.py again)")
+                return
             st = status(session)
         except Exception as e:
-            if not session_exists(session):
+            if not session_exists(session) and not refresh_session(session):
                 print("session is gone; exiting keep-alive (run colab_up.py again)")
                 return
             print(f"  status failed: {e}")
@@ -203,6 +281,7 @@ def main() -> None:
         print(colab("stop", "-s", args.session, check=False))
         return
     if args.status:
+        refresh_session(args.session)
         print(json.dumps(status(args.session), indent=2))
         return
     if args.keepalive_only:
