@@ -1,0 +1,39 @@
+[project]
+name = "fedrag"
+version = "0.1.0"
+description = "Agentic RAG over Federal Reserve publications with web search and live market-data agents"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pymupdf>=1.28,<1.29",  # pinned: text grouping differs across versions and the index depends on it
+    "openai>=1.50",
+    "httpx>=0.27",
+    "pydantic>=2.5",
+    "rich>=13.7",
+    "snowballstemmer>=2.2",
+    "ddgs>=9.0",
+    "trafilatura>=1.12",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pandas>=2.0",
+    "yfinance>=0.2.40",
+]
+
+[project.optional-dependencies]
+ui = ["gradio>=5.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+fedrag = "fedrag.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fedrag*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

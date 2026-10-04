@@ -35,6 +35,8 @@ LLM_GPU_UTIL = os.environ.get("FEDRAG_LLM_GPU_UTIL", "0.62")
 LLM_MAX_LEN = os.environ.get("FEDRAG_LLM_MAX_LEN", "65536")
 USE_MTP = os.environ.get("FEDRAG_LLM_MTP", "1") == "1"
 CLOUDFLARED = "/usr/local/bin/cloudflared"
+GATEWAY_LOCAL = "http://127.0.0.1:8000"
+TUNNEL_PATTERN = f"cloudflared tunnel --no-autoupdate --url {GATEWAY_LOCAL}"  # only our own tunnel
 
 
 def _get(url: str, timeout: float = 3.0) -> int | None:
@@ -85,7 +87,7 @@ def start_gateway(key: str) -> None:
 
 
 def start_vllm() -> None:
-    if _get("http://127.0.0.1:8001/health") == 200 or _running("vllm serve"):
+    if _get("http://127.0.0.1:8001/health") == 200 or _running(f"vllm serve {LLM_MODEL}"):
         print("vLLM already running/starting")
         return
     cmd = [
@@ -110,10 +112,10 @@ def start_tunnel(key: str) -> str:
             f"curl -sL -o {CLOUDFLARED} https://github.com/cloudflare/cloudflared/releases/latest/download/"
             f"cloudflared-linux-amd64 && chmod +x {CLOUDFLARED}", shell=True, check=True)
     log_path = LOGS / "tunnel.log"
-    if not _running("cloudflared tunnel"):
+    if not _running(TUNNEL_PATTERN):
         if log_path.exists():
             log_path.unlink()
-        _spawn("tunnel", [CLOUDFLARED, "tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:8000"])
+        _spawn("tunnel", [CLOUDFLARED, "tunnel", "--no-autoupdate", "--url", GATEWAY_LOCAL])
     for _ in range(60):
         if log_path.exists():
             m = re.findall(r"https://[a-z0-9-]+\.trycloudflare\.com", log_path.read_text())
@@ -130,8 +132,8 @@ def status() -> dict:
     out = {
         "gateway": _get("http://127.0.0.1:8000/health") == 200,
         "vllm": _get("http://127.0.0.1:8001/health") == 200,
-        "vllm_process": _running("vllm serve"),
-        "tunnel_process": _running("cloudflared tunnel"),
+        "vllm_process": _running(f"vllm serve {LLM_MODEL}"),
+        "tunnel_process": _running(TUNNEL_PATTERN),
     }
     if ENDPOINT_FILE.exists():
         out["url"] = json.loads(ENDPOINT_FILE.read_text())["url"]

@@ -23,7 +23,7 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 
-import fitz  # PyMuPDF
+import pymupdf
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -307,13 +307,13 @@ def rows_to_paragraphs(rows: list[Row], body_size: float) -> list[Paragraph]:
 
 
 def parse_pdf(path: str) -> ParsedPDF:
-    doc = fitz.open(path)
+    doc = pymupdf.open(path)
     page_height = doc[0].rect.height if len(doc) else 792.0
 
     raw_pages: list[list[Row]] = []
     size_hist: Counter[float] = Counter()
     for page in doc:
-        d = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_MEDIABOX_CLIP)
+        d = page.get_text("dict", flags=pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_MEDIABOX_CLIP)
         rows: list[Row] = []
         for bi, block in enumerate(d["blocks"]):
             if block.get("type") != 0:
