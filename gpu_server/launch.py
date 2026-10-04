@@ -128,15 +128,38 @@ def start_tunnel(key: str) -> str:
     raise SystemExit("tunnel URL not found; see /content/logs/tunnel.log")
 
 
-def status() -> dict:
+def _health_json(url: str, timeout: float = 8.0) -> dict | None:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read())
+    except Exception:
+        return None
+
+
+def status(heal: bool = False) -> dict:
+    gw = _health_json("http://127.0.0.1:8000/health")
     out = {
-        "gateway": _get("http://127.0.0.1:8000/health") == 200,
+        "gateway": gw is not None,
         "vllm": _get("http://127.0.0.1:8001/health") == 200,
         "vllm_process": _running(f"vllm serve {LLM_MODEL}"),
         "tunnel_process": _running(TUNNEL_PATTERN),
+        "idle_seconds": gw.get("idle_seconds") if gw else None,
     }
     if ENDPOINT_FILE.exists():
         out["url"] = json.loads(ENDPOINT_FILE.read_text())["url"]
+        # end-to-end check through Cloudflare (quick tunnels can silently lose their edge connection)
+        out["tunnel_ok"] = _health_json(out["url"] + "/health", timeout=15) is not None
+    if heal:
+        key = api_key()
+        if not out["gateway"]:
+            start_gateway(key)
+        if not out["vllm"] and not out["vllm_process"]:
+            start_vllm()
+        if not out["tunnel_process"] or out.get("tunnel_ok") is False:
+            subprocess.run(["pkill", "-f", TUNNEL_PATTERN])
+            time.sleep(2)
+            out["url"] = start_tunnel(key)
+            out["tunnel_restarted"] = True
     try:
         smi = subprocess.run(["nvidia-smi", "--query-gpu=memory.used,memory.total,utilization.gpu",
                               "--format=csv,noheader"], capture_output=True, text=True).stdout.strip()
@@ -149,10 +172,11 @@ def status() -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--heal", action="store_true", help="with --status: restart dead components")
     ap.add_argument("--wait-llm", action="store_true", help="block until vLLM answers /health")
     args = ap.parse_args()
     if args.status:
-        print(json.dumps(status()))
+        print(json.dumps(status(heal=args.heal)))
         return
     key = api_key()
     start_gateway(key)

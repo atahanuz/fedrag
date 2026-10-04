@@ -29,7 +29,7 @@ API_KEY = os.environ.get("FEDRAG_API_KEY", "")
 VLLM_URL = os.environ.get("FEDRAG_VLLM_URL", "http://127.0.0.1:8001")
 
 app = FastAPI(title="fedrag GPU gateway")
-state: dict = {}
+state: dict = {"last_request": time.time()}
 
 
 @app.on_event("startup")
@@ -42,10 +42,9 @@ async def _load() -> None:
 
 
 def auth(request: Request) -> None:
-    if not API_KEY:
-        return
-    if request.headers.get("authorization", "") != f"Bearer {API_KEY}":
+    if API_KEY and request.headers.get("authorization", "") != f"Bearer {API_KEY}":
         raise HTTPException(status_code=401, detail="invalid or missing API key")
+    state["last_request"] = time.time()  # drives the idle shutdown of the keep-alive loop
 
 
 @app.get("/health")
@@ -56,7 +55,8 @@ async def health() -> dict:
         llm_ok = r.status_code == 200
     except Exception:
         pass
-    return {"ok": True, "embedder": EMBED_MODEL, "reranker": RERANK_MODEL, "llm_ready": llm_ok}
+    return {"ok": True, "embedder": EMBED_MODEL, "reranker": RERANK_MODEL, "llm_ready": llm_ok,
+            "idle_seconds": round(time.time() - state["last_request"])}
 
 
 # ---------------------------------------------------------------------------

@@ -77,6 +77,9 @@ Specialist agents:
   Treasury yields, CPI/PCE inflation, unemployment, payrolls, GDP, Fed balance sheet ...), market prices
   (indices, stocks, commodities, crypto) and a calculator.
 
+Intent labels: fed_documents (only the local collection), live_data (only market_data), web (only
+web_research), mixed (several agents), general_knowledge / conversational (no tools).
+
 Routing rules:
 - Questions about what Fed publications say (FOMC deliberations, votes, staff outlook, Beige Book Districts,
   stress test results, financial stability, supervision, Fed research papers) -> fed_research.
@@ -99,8 +102,9 @@ economy and finance. Today's date is {today}. Specialist agents researched the u
 the final answer from their findings and the evidence excerpts.
 
 Rules:
-- Answer the question directly first, then give the supporting detail. Be concise but complete; use short
-  paragraphs or bullets, and a table when comparing several items.
+- Open with the direct answer in the first sentence or two (no "Answer:" label or heading), then give the
+  supporting detail. Be concise but complete; use short paragraphs or bullets, and a table when comparing
+  several items. Use headings only for long, multi-part answers.
 - Every factual statement drawn from the evidence must carry a citation with the evidence ID in square
   brackets, e.g. [D3] or [D3][W2]. Cite only IDs that appear in the evidence below.
 - Use only the evidence and findings provided for factual claims about documents, data and recent events.
@@ -131,4 +135,5 @@ Verdict:
 - "revise": problems the writer can fix with the existing evidence (list them precisely).
 - "research": important information is missing and more research could find it. Then propose up to 2
   follow-up tasks for agents fed_research, web_research or market_data, each self-contained.
-Be pragmatic: do not demand research for details the question did not ask about."""
+Be pragmatic: do not demand research for details the question did not ask about. Keep each issue to
+one or two sentences; with verdict "accept", list only issues worth noting (usually none)."""

@@ -68,15 +68,15 @@ class ToolAgent:
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-    async def _exec(self, ctx: RunContext, tc) -> str:
-        ctx.trace.emit(self.name, "tool_call", tool=tc.name, args=tc.arguments)
+    async def _exec(self, ctx: RunContext, tc, task_id: str) -> str:
+        ctx.trace.emit(self.name, "tool_call", task_id=task_id, tool=tc.name, args=tc.arguments)
         if tc.parse_error:
             out = f"ERROR: {tc.parse_error}. Re-issue the call with valid JSON arguments."
         elif tc.name not in self.tools:
             out = f"ERROR: unknown tool {tc.name!r}. Available: {', '.join(self.tools)} or {FINISH}."
         else:
             out = await self.tools[tc.name](ctx, tc.arguments)
-        ctx.trace.emit(self.name, "tool_result", tool=tc.name, ids=cited_ids(out)[:12],
+        ctx.trace.emit(self.name, "tool_result", task_id=task_id, tool=tc.name, ids=cited_ids(out)[:12],
                        preview=out[:300], chars=len(out))
         return out
 
@@ -103,9 +103,9 @@ class ToolAgent:
                 )
                 messages.append(resp.assistant_message())
                 if resp.reasoning:
-                    ctx.trace.emit(self.name, "thought", text=resp.reasoning[:1500])
+                    ctx.trace.emit(self.name, "thought", task_id=task_id, text=resp.reasoning[:1500])
                 elif resp.content and resp.tool_calls:
-                    ctx.trace.emit(self.name, "thought", text=resp.content[:1500])
+                    ctx.trace.emit(self.name, "thought", task_id=task_id, text=resp.content[:1500])
 
                 if not resp.tool_calls:
                     if not nudged and not last:
@@ -120,7 +120,7 @@ class ToolAgent:
                 others = [tc for tc in resp.tool_calls if tc.name != FINISH]
                 if others:
                     n_calls += len(others)
-                    outs = await asyncio.gather(*(self._exec(ctx, tc) for tc in others))
+                    outs = await asyncio.gather(*(self._exec(ctx, tc, task_id) for tc in others))
                     for tc, out in zip(others, outs):
                         seen += [i for i in cited_ids(out) if i not in seen]
                         messages.append({"role": "tool", "tool_call_id": tc.id, "content": out})
