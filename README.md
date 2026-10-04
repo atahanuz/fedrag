@@ -97,24 +97,34 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[ui
 
 # 3. Start the GPU server on Colab (see COLAB_GUIDE.md for the high-RAM A100 patch).
 #    Creates the session, installs vLLM, downloads models, embeds the corpus if data/index/ is missing,
-#    starts gateway + vLLM + tunnel, writes FEDRAG_GPU_URL / FEDRAG_API_KEY to .env, then keeps the VM
-#    alive while it is used.
+#    starts gateway + vLLM + tunnel + keeper, writes FEDRAG_GPU_URL / FEDRAG_API_KEY to .env, and leaves
+#    a heartbeat running in the background.
 .venv/bin/python scripts/colab_up.py          # about 13 min on a fresh VM
 .venv/bin/python -m fedrag status             # gateway, LLM and index check
 ```
 
-`scripts/colab_up.py --stop` releases the VM. `colab_up.py` also works around two Colab behaviours:
+`scripts/colab_up.py --stop` ends the heartbeat and releases the VM. `--status` shows the serving
+stack, the keeper and the heartbeat.
 
-- Colab reclaims a VM about 20 minutes after the last kernel execution, even while the servers in the
-  background are busy. The keep-alive loop therefore runs a tiny status cell every 4 minutes. It stops
-  after 60 minutes without gateway requests, and Colab then releases the VM.
-- `colab-cli` 0.6.0 never refreshes its runtime-proxy token, which expires after about an hour. The
-  next `exec` gets a 401, and the CLI deletes the session record and kills its keep-alive daemon,
-  although the VM is still running (`colab sessions` shows it as `[?]`). The loop refreshes the token on
-  every heartbeat through the CLI's own state API, and re-adopts such orphans.
+Keeping a Colab VM alive needed measurements (data in
+[COLAB_GUIDE.md](COLAB_GUIDE.md#why-sessions-die-and-how-to-keep-them-alive)):
 
-The loop also repairs a dropped tunnel and updates `.env` with the new URL.
-`python scripts/colab_up.py --keepalive-only` restarts just the loop.
+- Colab releases a GPU VM 20-22 minutes after the last kernel-websocket traffic through its proxy.
+  Busy servers on the VM do not count, and neither do a busy kernel, HTTP requests through the proxy or
+  the CLI's own keep-alive pings. A websocket that the VM opens to its own kernel through its public
+  proxy URL does count, so `gpu_server/keeper.py` holds one while the gateway is in use. The VM
+  therefore survives the laptop sleeping. After 60 minutes without gateway requests (`--idle-minutes`)
+  the keeper lets go, and Colab releases the VM about 20 minutes later.
+- `colab-cli` 0.6.0 never refreshes its runtime-proxy token, which expires after an hour. The next
+  `colab exec` then gets a 401, and the CLI forgets the session although the VM keeps running.
+  `scripts/colab_keepalive.py` refreshes the token before it expires and re-adopts a VM that the CLI
+  has already dropped.
+- The background heartbeat runs the status cell every 4 minutes. It restarts crashed components,
+  hands the keeper fresh tokens, updates `.env` when the tunnel URL changes, and is a second keep-alive
+  path. `colab_up.py --keepalive-only` restarts it; its log is `~/.cache/colab-keepalive/fedrag.log`.
+
+For other colab-cli sessions, `python scripts/colab_keepalive.py -s NAME --detach` runs the same
+heartbeat and token refresh (without the keeper).
 
 ## Usage
 
@@ -226,8 +236,8 @@ fedrag/
   orchestrator.py  the pipeline;  evidence.py  citation registry;  llm.py  OpenAI-compatible client
   cli.py, ui/app.py
 gpu_server/      models.py, embed_corpus.py, gateway.py (FastAPI: auth, embeddings, rerank, LLM proxy),
-                 launch.py (vLLM + gateway + tunnel), setup_vm.py
-scripts/         colab_up.py
+                 launch.py (vLLM + gateway + tunnel + keeper), keeper.py, setup_vm.py
+scripts/         colab_up.py (Colab bring-up), colab_keepalive.py (heartbeat + token refresh)
 eval/            questions.jsonl, run_eval.py
 tests/           offline unit tests
 federal_reserve/ the source PDFs (not in git; metadata.csv lists their URLs)

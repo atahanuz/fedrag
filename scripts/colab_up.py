@@ -1,24 +1,22 @@
 """Bring up (or reconnect to) the GPU server on Google Colab with one command.
 
-    python scripts/colab_up.py              # create/reuse session, set up, launch, write .env, keep alive
-    python scripts/colab_up.py --no-keepalive
+    python scripts/colab_up.py                      # create/reuse session, set up, launch, write .env, keep alive
     python scripts/colab_up.py --status
-    python scripts/colab_up.py --stop       # release the VM (stops billing)
+    python scripts/colab_up.py --stop               # stop the heartbeat and release the VM (stops billing)
+    python scripts/colab_up.py --keepalive-only     # (re)start just the heartbeat; add --foreground to watch it
 
 Steps: create a high-RAM A100 session (``COLAB_HIGH_MEM=1 colab new --gpu A100``, see COLAB_GUIDE.md),
 upload ``gpu_server/``, install vLLM and download the models, embed the corpus if the local index is
 missing, start gateway + vLLM + Cloudflare tunnel, and write FEDRAG_GPU_URL / FEDRAG_API_KEY to ``.env``.
 
-Colab reclaims a VM roughly 20 minutes after the last kernel execution, even while background servers
-are busy. The keep-alive loop therefore runs a tiny status cell every few minutes, but only while the
-gateway is actually being used: after ``--idle-minutes`` without requests it stops, and Colab releases
-the VM.
-
-The CLI (0.6.0) also never refreshes its runtime-proxy token, which expires after about an hour; the next
-``colab exec`` then gets a 401, and the CLI deletes the session record and kills its keep-alive daemon
-while the VM keeps running (an orphan, shown as ``[?]`` by ``colab sessions``). ``refresh_session``
-re-adopts the assignment with a fresh token from the assignment listing; the keep-alive loop calls it
-on every heartbeat so the token never expires.
+Colab releases a GPU VM about 20 minutes after the last kernel-websocket traffic through its proxy, no
+matter how busy the VM itself is, and colab-cli 0.6.0 loses the session when its proxy token expires
+after an hour (details in colab_keepalive.py and COLAB_GUIDE.md). So launch.py also starts
+gpu_server/keeper.py, which holds a websocket from the VM to itself through the proxy while the gateway
+is in use, and this script uploads the proxy URL and a token for it. After bring-up, a background
+heartbeat also runs the status cell every 4 minutes: it restarts crashed components, keeps both tokens
+fresh, and rewrites .env if the tunnel URL changes. After ``--idle-minutes`` without gateway requests both
+let go, and Colab releases the VM about 20 minutes later.
 """
 
 from __future__ import annotations
@@ -27,7 +25,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tarfile
@@ -35,103 +32,10 @@ import tempfile
 import time
 from pathlib import Path
 
+from colab_keepalive import (colab, describe, detach, ensure_token, keep_alive, push_keeper_config,
+                             refresh_session, stop_daemon, vm_exec)
+
 ROOT = Path(__file__).resolve().parent.parent
-NOISE = re.compile(r"new version of Colab CLI|colab update|pip install --upgrade|enable_update_check|^\s*$")
-
-
-def colab(*args: str, env: dict | None = None, timeout: int = 900, check: bool = True) -> str:
-    p = subprocess.run(["colab", *args], capture_output=True, text=True, timeout=timeout,
-                       env={**os.environ, **(env or {})})
-    out = "\n".join(line for line in (p.stdout + p.stderr).splitlines() if not NOISE.search(line))
-    if check and p.returncode != 0:
-        raise RuntimeError(f"colab {' '.join(args)} failed:\n{out}")
-    return out
-
-
-_REFRESH = r"""
-import json, os, sys
-from colab_cli.commands.session import spawn_keep_alive
-from colab_cli.common import State
-from colab_cli.state import SessionState
-
-session = sys.argv[1]
-st = State()
-local = st.store.list()
-assignments = st.client.list_assignments()
-existing = st.store.get(session)
-if existing is not None:
-    target = next((a for a in assignments if a.endpoint == existing.endpoint), None)
-else:  # adopt the single orphan (an assignment no local record points to)
-    known = {s.endpoint for s in local.values()}
-    orphans = [a for a in assignments if a.endpoint not in known]
-    target = orphans[0] if len(orphans) == 1 else None
-if target is None:
-    print(json.dumps({"ok": False}))
-    sys.exit(0)
-rec = SessionState(
-    name=session, token=target.runtime_proxy_info.token, url=target.runtime_proxy_info.url,
-    endpoint=target.endpoint, variant=target.variant.name, accelerator=target.accelerator.value,
-    kernel_id=existing.kernel_id if existing else None, session_id=existing.session_id if existing else None,
-    keep_alive_pid=existing.keep_alive_pid if existing else None,
-)
-alive = False
-if rec.keep_alive_pid:
-    try:
-        os.kill(rec.keep_alive_pid, 0)
-        alive = True
-    except OSError:
-        pass
-st.store.add(rec)
-if not alive:
-    rec.keep_alive_pid = spawn_keep_alive(target.endpoint, session, auth_provider=st.auth_provider,
-                                          config_path=st.config_path)
-    st.store.add(rec)
-print(json.dumps({"ok": True, "adopted": existing is None, "endpoint": target.endpoint}))
-"""
-
-
-def _colab_python() -> str:
-    """The interpreter that runs the `colab` executable (where the patched colab_cli is installed)."""
-    exe = shutil.which("colab")
-    if exe:
-        first = open(exe, "rb").readline().decode(errors="replace").strip()
-        if first.startswith("#!") and "python" in first:
-            return first[2:].strip().split()[0]
-    return sys.executable
-
-
-def refresh_session(session: str) -> bool:
-    """Give the CLI's record for ``session`` a fresh runtime-proxy token, re-adopting the assignment if
-    the CLI dropped it, and make sure its keep-alive daemon runs. Uses the CLI's own state API."""
-    p = subprocess.run([_colab_python(), "-c", _REFRESH, session], capture_output=True, text=True, timeout=120)
-    m = re.search(r"\{.*\}", p.stdout)
-    if not m:
-        print(f"  session refresh failed: {(p.stderr or p.stdout)[-300:]}")
-        return False
-    res = json.loads(m.group(0))
-    if res.get("adopted"):
-        print(f"re-adopted orphaned assignment {res['endpoint']} as session {session}")
-    return bool(res.get("ok"))
-
-
-def vm_exec(session: str, code: str, timeout: int = 600, retries: int = 3) -> str:
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
-        f.write(code)
-        path = f.name
-    try:
-        for attempt in range(retries):
-            try:
-                return colab("exec", "-s", session, "-f", path, timeout=timeout)
-            except (RuntimeError, subprocess.TimeoutExpired) as e:
-                if attempt == retries - 1:
-                    raise
-                print(f"  exec retry ({str(e)[:120]})")
-                if "appears to be lost" in str(e):
-                    refresh_session(session)  # expired proxy token, not a dead VM
-                time.sleep(10)  # first exec after READY may time out while the kernel boots
-    finally:
-        os.unlink(path)
-    return ""
 
 
 def session_exists(session: str) -> bool:
@@ -150,13 +54,24 @@ def ensure_session(session: str) -> None:
               "Re-apply the COLAB_GUIDE.md patch or lower FEDRAG_LLM_GPU_UTIL.")
 
 
+def colab_s(session: str, command: str, *args: str) -> str:
+    """A `colab` command against ``session``, with a proxy token that is still valid."""
+    ensure_token(session)
+    return colab(command, "-s", session, *args)
+
+
+def push_proxy(session: str, idle_minutes: int) -> None:
+    """Hand keeper.py on the VM the proxy URL, a fresh token and the idle cutoff (when they changed)."""
+    push_keeper_config(session, {"idle_minutes": idle_minutes})
+
+
 def upload_code(session: str) -> None:
     with tempfile.TemporaryDirectory() as td:
         tgz = Path(td) / "gpu_server.tgz"
         with tarfile.open(tgz, "w:gz") as tar:
             tar.add(ROOT / "gpu_server", arcname="gpu_server",
                     filter=lambda ti: None if "__pycache__" in ti.name else ti)
-        colab("upload", "-s", session, str(tgz), "/content/gpu_server.tgz")
+        colab_s(session, "upload", str(tgz), "/content/gpu_server.tgz")
     vm_exec(session, "import subprocess; subprocess.run('cd /content && tar xzf gpu_server.tgz', shell=True)")
 
 
@@ -199,17 +114,17 @@ def ensure_embeddings(session: str) -> None:
         return
     print("embedding the corpus on the GPU ...")
     subprocess.run([sys.executable, "-m", "fedrag.retrieval.index", "prepare"], cwd=ROOT, check=True)
-    colab("upload", "-s", session, str(config.INDEX_DIR / "embed_input.jsonl"), "/content/embed_input.jsonl")
+    colab_s(session, "upload", str(config.INDEX_DIR / "embed_input.jsonl"), "/content/embed_input.jsonl")
     run_detached(session, "embed_corpus.py", ["/content/embed_input.jsonl", "/content/index_out"], "embed.log")
     wait_for(session, "embed.log", "EMBED_DONE", 1800, "corpus embedding")
-    colab("download", "-s", session, "/content/index_out/embeddings.npy", str(emb_path))
-    colab("download", "-s", session, "/content/index_out/ids.json", str(ids_path))
+    colab_s(session, "download", "/content/index_out/embeddings.npy", str(emb_path))
+    colab_s(session, "download", "/content/index_out/ids.json", str(ids_path))
 
 
 def write_env(session: str) -> dict:
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "endpoint.json"
-        colab("download", "-s", session, "/content/fedrag_endpoint.json", str(p))
+        colab_s(session, "download", "/content/fedrag_endpoint.json", str(p))
         ep = json.loads(p.read_text())
     env_path = ROOT / ".env"
     keep = []
@@ -229,68 +144,93 @@ print(subprocess.run(['python', '/content/gpu_server/launch.py', '--status', '--
 
 
 def status(session: str) -> dict:
-    out = vm_exec(session, STATUS_CELL)
+    out = vm_exec(session, STATUS_CELL, timeout=600)  # healing can restart the gateway (minutes)
     m = re.search(r"\{.*\}", out, re.S)
     return json.loads(m.group(0)) if m else {"raw": out}
 
 
-def keepalive(session: str, interval_s: int, idle_minutes: int) -> None:
-    """Heartbeat while the gateway is in use; re-sync .env if the tunnel URL changes."""
-    print(f"keep-alive: status cell every {interval_s}s; stops after {idle_minutes} idle minutes (Ctrl-C to stop)")
-    url = None
-    while True:
+def env_url() -> str | None:
+    env_path = ROOT / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            if line.startswith("FEDRAG_GPU_URL="):
+                return line.split("=", 1)[1].strip()
+    return None
+
+
+def heartbeat(idle_minutes: int):
+    """The status cell doubles as the heartbeat: it is kernel traffic through the Colab proxy, which is
+    what Colab's idle timer counts, and it restarts crashed components. Each beat also hands the VM's
+    keeper a fresh token."""
+
+    def beat(session: str) -> bool:
         try:
-            if not refresh_session(session):  # keeps the proxy token fresh (it expires after ~1 hour)
-                print("session is gone; exiting keep-alive (run colab_up.py again)")
-                return
-            st = status(session)
-        except Exception as e:
-            if not session_exists(session) and not refresh_session(session):
-                print("session is gone; exiting keep-alive (run colab_up.py again)")
-                return
-            print(f"  status failed: {e}")
-            time.sleep(interval_s)
-            continue
-        if st.get("url") and st["url"] != url:
-            if url is not None:
-                print(f"  tunnel URL changed -> {st['url']}; updating .env")
-                write_env(session)
-            url = st["url"]
+            push_proxy(session, idle_minutes)
+        except Exception as e:  # the keeper still has its last token; the status cell matters more
+            print(f"  could not update the keeper's token: {str(e)[-200:]}", flush=True)
+        st = status(session)
+        if st.get("url") and st["url"] != env_url():
+            print(f"  tunnel URL is now {st['url']}; updating .env", flush=True)
+            write_env(session)
         idle = st.get("idle_seconds")
-        print(f"  {time.strftime('%H:%M:%S')} gateway={st.get('gateway')} llm={st.get('vllm')} "
-              f"tunnel={st.get('tunnel_ok', st.get('tunnel_process'))} idle={idle}s gpu={st.get('gpu')}")
-        if idle is not None and idle > idle_minutes * 60:
-            print(f"gateway idle for more than {idle_minutes} minutes: stopping keep-alive; Colab will "
-                  f"release the VM in ~20 minutes (or run --stop now)")
-            return
-        time.sleep(interval_s)
+        keeper = st.get("keeper") or {}
+        print(f"{time.strftime('%H:%M:%S')} gateway={st.get('gateway')} llm={st.get('vllm')} "
+              f"tunnel={st.get('tunnel_ok', st.get('tunnel_process'))} keeper={keeper.get('connected')} "
+              f"idle={idle}s gpu={st.get('gpu')}", flush=True)
+        if idle_minutes and idle is not None and idle > idle_minutes * 60:
+            print(f"gateway idle for more than {idle_minutes} minutes: the heartbeat stops, and Colab releases "
+                  f"the VM in about 20 minutes (or run --stop now)", flush=True)
+            return False
+        return True
+
+    return beat
+
+
+def start_keepalive(args: argparse.Namespace) -> None:
+    if args.foreground:
+        keep_alive(args.session, heartbeat(args.idle_minutes), args.interval)
+        return
+    log = detach(args.session, [str(Path(__file__).resolve()), "--keepalive-only", "--foreground",
+                                "-s", args.session, "--interval", str(args.interval),
+                                "--idle-minutes", str(args.idle_minutes)])
+    print(f"heartbeat running in the background (log: {log}); `--stop` ends it and releases the VM")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-s", "--session", default="fedrag")
     ap.add_argument("--status", action="store_true")
-    ap.add_argument("--stop", action="store_true")
-    ap.add_argument("--keepalive-only", action="store_true", help="only run the heartbeat loop")
+    ap.add_argument("--stop", action="store_true", help="stop the heartbeat and release the VM")
+    ap.add_argument("--keepalive-only", action="store_true", help="(re)start just the heartbeat")
+    ap.add_argument("--foreground", action="store_true", help="run the heartbeat in this terminal")
     ap.add_argument("--no-keepalive", action="store_true")
     ap.add_argument("--interval", type=int, default=240, help="heartbeat seconds (Colab idles out at ~20 min)")
-    ap.add_argument("--idle-minutes", type=int, default=45)
+    ap.add_argument("--idle-minutes", type=int, default=60,
+                    help="stop the heartbeat after this long without gateway requests (0: never)")
     args = ap.parse_args()
 
     if args.stop:
-        print(colab("stop", "-s", args.session, check=False))
+        stop_daemon(args.session)
+        if ensure_token(args.session):  # re-adopts the VM if the CLI dropped its record
+            print(colab("stop", "-s", args.session, check=False))
+        else:
+            print(f"session {args.session} is not running")
         return
     if args.status:
-        refresh_session(args.session)
+        if not ensure_token(args.session):
+            print(f"session {args.session} is not running")
+            return
         print(json.dumps(status(args.session), indent=2))
+        print(describe(args.session))
         return
     if args.keepalive_only:
-        keepalive(args.session, args.interval, args.idle_minutes)
+        start_keepalive(args)
         return
 
     t0 = time.time()
     ensure_session(args.session)
     upload_code(args.session)
+    push_proxy(args.session, args.idle_minutes)
     run_detached(args.session, "setup_vm.py", [], "setup.log")
     wait_for(args.session, "setup.log", "SETUP_DONE", 1800, "VM setup (vLLM install + model download)")
     ensure_embeddings(args.session)
@@ -300,7 +240,7 @@ def main() -> None:
     print(f"\nGPU server ready in {time.time() - t0:.0f}s at {ep['url']} (credentials written to .env)")
     print("Try:  .venv/bin/python -m fedrag status")
     if not args.no_keepalive:
-        keepalive(args.session, args.interval, args.idle_minutes)
+        start_keepalive(args)
 
 
 if __name__ == "__main__":

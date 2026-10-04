@@ -6,6 +6,7 @@ A100, running vLLM in a session, and the environment quirks that bite along the 
 - [High-RAM sessions (80GB A100)](#high-ram-sessions-80gb-a100)
 - [Running vLLM in a session](#running-vllm-in-a-session)
 - [Session environment gotchas](#session-environment-gotchas)
+- [Why sessions die, and how to keep them alive](#why-sessions-die-and-how-to-keep-them-alive)
 
 ## High-RAM sessions (80GB A100)
 
@@ -102,6 +103,13 @@ colab new --gpu A100 --high-mem
 
 The CLI already has a `Shape` enum with `HIGH_RAM = 1` in `client.py`, but in 0.6.0 it
 is only used to *parse* the shape of existing sessions, never to request one.
+
+**Update 2026-10-04:** it shipped. Per its source, `google-colab-cli` 0.7.x (0.7.4 on PyPI) has
+`colab new --high-mem`, so upgrading no longer costs you the 80GB A100 as long as you switch to the
+flag. 0.7.x also refreshes the runtime-proxy token by itself, which fixes the one-hour session loss
+described in [Why sessions die](#why-sessions-die-and-how-to-keep-them-alive). It also removes the
+keep-alive daemon, which never prevented the idle reclaim anyway. Not yet run here: this repo still
+uses 0.6.0 with the patch.
 
 ## Running vLLM in a session
 
@@ -207,3 +215,80 @@ Retry.
 
 **Long jobs need detaching.** See the vLLM launch pattern above; it applies to any
 multi-minute workload.
+
+## Why sessions die, and how to keep them alive
+
+Measured on 2026-10-04 with `google-colab-cli` 0.6.0 on T4 and A100 sessions, plus the CLI's own
+history of about 60 earlier sessions (`~/.config/colab-cli/history/*.jsonl`). There are two separate
+causes, and each needs its own fix.
+
+### 1. The CLI drops the session after one hour
+
+Each session talks to its VM with a runtime-proxy token, a JWT whose `exp` is one hour after it was
+issued (`"tokenExpiresInSeconds": 3600`). 0.6.0 stores the token at `colab new` and never refreshes it.
+After an hour the next `colab exec`, `upload` or `download` gets a 401. The CLI then prints
+`Session 'X' appears to be lost (404/401). Cleaning up.`, deletes its record of the session and kills
+the keep-alive daemon. **The VM is fine and still billing**: `colab sessions` lists it as `[?]`, and
+Colab reclaims it about 20 minutes later because nothing talks to it any more. About half of the 60
+sessions in the history ended this way, almost all of them 60-62 minutes after creation.
+
+Fix: every assignment listing (`GET /tun/m/assignments`, which `colab sessions` calls) mints a fresh
+token for each running assignment, so swap one into the session record before the old one expires.
+colab-cli 0.7.x does this for every command. For 0.6.0, `scripts/colab_keepalive.py` does it
+(`ensure_token`), and it can also re-adopt a VM whose record the CLI has already deleted.
+
+### 2. Colab reclaims an idle VM after about 20 minutes
+
+A GPU VM disappears 20-22 minutes after the last kernel-websocket traffic through the Colab proxy,
+however busy the VM itself is. Measured on T4 sessions, timing from the last `colab exec`:
+
+| During the idle period | Result |
+| --- | --- |
+| nothing (control) | gone after 22.3 min |
+| the CLI's keep-alive daemon pinging `/tun/m/<endpoint>/keep-alive/` every 60 s (HTTP 200) | no effect (it ran in every session in this table) |
+| `GET /api/kernels` through the runtime proxy every 4 min (HTTP 200) | gone after 20.7 min |
+| kernel busy with a never-ending cell (`while True: time.sleep(30)`) | gone after 21.7 min |
+| a process on the VM running `1+1` on its kernel through `localhost:8080` every 4 min | gone after 22.2 min |
+| (A100, earlier) vLLM serving requests through a Cloudflare tunnel, GPU busy | gone 22.5 min after the last exec |
+| a client connecting to the kernel websocket every 4.5 min (`kernel_info` handshake, no code) | alive at 28 min (stopped) |
+| a client holding **one** kernel websocket open, no code at all | alive at 68 min (stopped), 8 min after its token expired |
+| the VM holding a websocket to its own kernel through its **public** proxy URL | alive at 86 min (stopped): one connection, still open 26 min after its token expired |
+| `gpu_server/keeper.py` (the previous row, driven by a usage policy), 35 min of use, then none | held the VM with no client at all, let go 5 min after use stopped; gone 58.5 min after the last client contact |
+| (A100 80GB, the whole fedrag stack) keeper only, the gateway used through Cloudflare every 5 min | alive 26 min after the last client contact (stopped) |
+| `colab exec` every few minutes | alive (dozens of A100 sessions in the history, until the CLI dropped them at 60 min) |
+
+What the table shows:
+
+- Colab's idle timer only counts kernel websocket connections through its proxy. An open connection is
+  enough, with no code running. That is how a browser tab or VS Code keeps a runtime alive, and why a
+  kernel busy with a long cell does not keep a CLI session alive. Colab's VS Code extension states the
+  same limits in its source: an idle server "is reclaimed within ~30 minutes and none outlive 24 hours".
+- The token is only checked when a connection opens. An open websocket outlives it.
+- It does not matter where the connection comes from. A VM can keep itself alive by connecting to its
+  own public proxy URL, as long as it has a token from the client to open that connection.
+- CPU runtimes have a much longer idle window: a CPU control lasted 182 minutes after its last exec.
+
+Fixes, in order of independence from your laptop:
+
+1. **In-VM keeper.** `gpu_server/keeper.py` holds a websocket from the VM to a kernel of its own through
+   the public proxy, using a token that the client uploads to `/content/colab_proxy.json`. It closes the
+   connection when its policy says the VM is no longer in use, so an unused VM is still released. The
+   VM then survives the client sleeping or going offline. fedrag's `launch.py` starts it with a "gateway
+   used in the last 60 minutes" policy. For any other session:
+
+   ```bash
+   python scripts/colab_keepalive.py -s NAME --keeper-while train.py   # while it runs, plus 30 min
+   python scripts/colab_keepalive.py -s NAME --keeper-hours 6
+   python scripts/colab_keepalive.py -s NAME --keeper-release          # Colab reclaims it ~20 min later
+   ```
+
+2. **Client heartbeat.** `python scripts/colab_keepalive.py -s NAME --detach` runs a no-op cell every
+   4 minutes and keeps the CLI's token fresh (and the keeper's, if one is installed). It works for any
+   session with no setup on the VM, but without a keeper the VM is lost if the client machine sleeps or
+   goes offline for more than ~20 minutes. On macOS the heartbeat therefore holds a `caffeinate`
+   assertion while it runs.
+
+Opening a kernel websocket through the proxy sometimes takes more than 10 seconds (often enough on a
+far-away VM such as `asia-southeast1`). The CLI then gives up with a traceback, and the next attempt
+usually connects in under a second, so retry `colab exec` failures (`vm_exec` in
+`scripts/colab_keepalive.py` does).

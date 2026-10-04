@@ -1,6 +1,7 @@
 """One-time setup of a fresh Colab GPU VM (run detached; logs to /content/logs/setup.log).
 
 * installs vLLM and removes the mismatched preinstalled torchaudio (see COLAB_GUIDE.md)
+* installs the gateway's dependencies, and websocket-client for keeper.py
 * downloads the LLM, embedding and reranking weights
 Prints SETUP_DONE when finished.
 """
@@ -31,7 +32,7 @@ def main() -> None:
         sh(f"{sys.executable} -m pip install -q -U vllm")
     # vLLM pulls a newer torch; the preinstalled torchaudio then breaks `import transformers`.
     sh(f"{sys.executable} -m pip uninstall -y -q torchaudio")
-    sh(f"{sys.executable} -m pip install -q fastapi uvicorn httpx sentence-transformers")
+    sh(f"{sys.executable} -m pip install -q fastapi uvicorn httpx sentence-transformers websocket-client")
 
     from huggingface_hub import snapshot_download
 

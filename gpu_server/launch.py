@@ -3,6 +3,7 @@
 1. gateway (embedder + reranker + auth + LLM proxy) on :8000
 2. vLLM OpenAI server for the LLM on 127.0.0.1:8001 (only reachable via the gateway)
 3. Cloudflare quick tunnel -> public https URL for the gateway
+4. keeper.py, which keeps the VM alive from the inside while the gateway is in use
 
 Writes ``/content/fedrag_endpoint.json`` = {"url": ..., "api_key": ...}.
 Every process is detached (``start_new_session``) and logs to /content/logs/.
@@ -37,6 +38,8 @@ USE_MTP = os.environ.get("FEDRAG_LLM_MTP", "1") == "1"
 CLOUDFLARED = "/usr/local/bin/cloudflared"
 GATEWAY_LOCAL = "http://127.0.0.1:8000"
 TUNNEL_PATTERN = f"cloudflared tunnel --no-autoupdate --url {GATEWAY_LOCAL}"  # only our own tunnel
+KEEPER_PATTERN = "gpu_server/keeper.py"
+KEEPER_STATE = LOGS / "keeper_state.json"
 
 
 def _get(url: str, timeout: float = 3.0) -> int | None:
@@ -129,6 +132,11 @@ def start_tunnel(key: str) -> str:
     raise SystemExit("tunnel URL not found; see /content/logs/tunnel.log")
 
 
+def start_keeper() -> None:
+    if not _running(KEEPER_PATTERN):
+        _spawn("keeper", [sys.executable, "-u", str(HERE / "keeper.py")])
+
+
 def _health_json(url: str, timeout: float = 8.0) -> dict | None:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
@@ -145,7 +153,10 @@ def status(heal: bool = False) -> dict:
         "vllm_process": _running(f"vllm serve {LLM_MODEL}"),
         "tunnel_process": _running(TUNNEL_PATTERN),
         "idle_seconds": gw.get("idle_seconds") if gw else None,
+        "keeper_process": _running(KEEPER_PATTERN),
     }
+    if KEEPER_STATE.exists():
+        out["keeper"] = json.loads(KEEPER_STATE.read_text())
     if ENDPOINT_FILE.exists():
         out["url"] = json.loads(ENDPOINT_FILE.read_text())["url"]
         # end-to-end check through Cloudflare (quick tunnels can silently lose their edge connection)
@@ -165,6 +176,8 @@ def status(heal: bool = False) -> dict:
             out["url"] = start_tunnel(key)
             out["tunnel_ok"] = True
             out["tunnel_restarted"] = True
+        if not out["keeper_process"]:
+            start_keeper()
     try:
         smi = subprocess.run(["nvidia-smi", "--query-gpu=memory.used,memory.total,utilization.gpu",
                               "--format=csv,noheader"], capture_output=True, text=True).stdout.strip()
@@ -187,6 +200,7 @@ def main() -> None:
     start_gateway(key)
     start_vllm()
     url = start_tunnel(key)
+    start_keeper()
     print(f"ENDPOINT {url}")
     if args.wait_llm:
         for _ in range(600):
