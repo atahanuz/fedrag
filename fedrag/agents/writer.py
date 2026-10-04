@@ -28,7 +28,7 @@ def _findings_block(results: list[AgentResult]) -> str:
 
 
 async def synthesize(llm: LLM, question: str, today: str, results: list[AgentResult], store: EvidenceStore,
-                     history_note: str = "") -> str:
+                     history_note: str = "", on_delta=None) -> str:
     ids = select_evidence(results, store)
     user = (f"{history_note}User question: {question}\n\n"
             f"## Findings from the research agents\n{_findings_block(results)}\n\n"
@@ -36,12 +36,12 @@ async def synthesize(llm: LLM, question: str, today: str, results: list[AgentRes
             "Write the final answer now.")
     r = await llm.chat([{"role": "system", "content": prompts.SYNTHESIZER.format(today=today)},
                         {"role": "user", "content": user}],
-                       agent="synthesizer", temperature=0.3, max_tokens=2500)
+                       agent="synthesizer", temperature=0.3, max_tokens=2500, on_delta=on_delta)
     return r.content
 
 
 async def revise(llm: LLM, question: str, today: str, draft: str, issues: list[str], results: list[AgentResult],
-                 store: EvidenceStore) -> str:
+                 store: EvidenceStore, on_delta=None) -> str:
     ids = list(dict.fromkeys(cited_ids(draft) + select_evidence(results, store)))[:MAX_EVIDENCE_ITEMS]
     user = (f"User question: {question}\n\n## Draft answer\n{draft}\n\n"
             "## Problems found by the fact-checker\n" + "\n".join(f"- {i}" for i in issues) +
@@ -50,14 +50,14 @@ async def revise(llm: LLM, question: str, today: str, draft: str, issues: list[s
             "Rewrite the answer fixing every problem. Keep what was correct. Output only the final answer.")
     r = await llm.chat([{"role": "system", "content": prompts.SYNTHESIZER.format(today=today)},
                         {"role": "user", "content": user}],
-                       agent="synthesizer", temperature=0.2, max_tokens=2500)
+                       agent="synthesizer", temperature=0.2, max_tokens=2500, on_delta=on_delta)
     return r.content
 
 
-async def direct_answer(llm: LLM, question: str, today: str, history_note: str = "") -> str:
+async def direct_answer(llm: LLM, question: str, today: str, history_note: str = "", on_delta=None) -> str:
     r = await llm.chat([{"role": "system", "content": prompts.DIRECT.format(today=today)},
                         {"role": "user", "content": f"{history_note}{question}"}],
-                       agent="direct", temperature=0.4, max_tokens=1500)
+                       agent="direct", temperature=0.4, max_tokens=1500, on_delta=on_delta)
     return r.content
 
 

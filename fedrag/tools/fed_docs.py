@@ -68,6 +68,26 @@ async def search_fed_documents(ctx: RunContext, query: str, doc_types=None, date
     return "\n\n---\n\n".join(out) + note
 
 
+async def find_documents(ctx: RunContext, topic: str, doc_types=None, date_from: str | None = None,
+                         date_to: str | None = None, max_documents: int = 8) -> str:
+    doc_types = _as_list(doc_types)
+    hits = await ctx.index.search(topic, k=40, doc_types=doc_types, date_from=_norm_date(date_from, False),
+                                  date_to=_norm_date(date_to, True), candidates=40)
+    by_doc: dict[str, list] = {}
+    for h in hits:
+        by_doc.setdefault(h.chunk["doc_id"], []).append(h)
+    ranked = sorted(by_doc.items(), key=lambda kv: -sum(sorted((h.score for h in kv[1]), reverse=True)[:3]))
+    if not ranked:
+        return "No documents match."
+    lines = [f"Documents most relevant to {topic!r} (strongest first):"]
+    for doc_id, hs in ranked[: max(1, min(int(max_documents), 15))]:
+        d = ctx.index.docs[doc_id]
+        best = sorted(hs, key=lambda h: -h.score)[:3]
+        secs = "; ".join(f"{h.chunk['section'] or '-'} (p. {h.chunk['page_start']}, rel {h.score:.2f})" for h in best)
+        lines.append(f"- doc_id={doc_id} | {d['title']} | date={d['date']} | {len(hs)} matching passages | {secs}")
+    return "\n".join(lines)
+
+
 async def list_fed_documents(ctx: RunContext, doc_type: str | None = None, date_from: str | None = None,
                              date_to: str | None = None, title_contains: str | None = None) -> str:
     if doc_type and doc_type not in DOC_TYPES:
@@ -153,6 +173,19 @@ def make_fed_tools() -> list[Tool]:
                 "top_k": {"type": "integer", "description": "Number of passages (1-10, default 6)"},
             }, ["query"]),
             search_fed_documents,
+        ),
+        Tool(
+            "find_documents",
+            "Find WHICH documents discuss a topic: ranks documents by their best-matching passages and shows "
+            "the most relevant sections/pages of each. Use it for questions like 'which reports or papers "
+            "discuss X' or to pick documents before searching within them (doc_ids filter).",
+            schema({
+                "topic": {"type": "string"},
+                "doc_types": {"type": "array", "items": {"type": "string", "enum": DOC_TYPES}},
+                "date_from": {"type": "string"}, "date_to": {"type": "string"},
+                "max_documents": {"type": "integer", "description": "1-15, default 8"},
+            }, ["topic"]),
+            find_documents,
         ),
         Tool(
             "list_fed_documents",

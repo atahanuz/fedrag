@@ -26,6 +26,8 @@ class Evidence:
     meta: dict = field(default_factory=dict)
 
     def render(self, max_chars: int = 2500) -> str:
+        if self.meta.get("unit") == "page":  # a full page (often a table) the agent chose to read
+            max_chars *= 2
         body = self.text if len(self.text) <= max_chars else self.text[:max_chars] + " ..."
         return f"[{self.id}] {self.source}\n{body}"
 
@@ -63,7 +65,7 @@ class EvidenceStore:
             f"page:{doc['doc_id']}:{page}", "doc", title=doc["title"], text=text,
             source=f"{doc['title']}, p. {page}", url=doc.get("url"),
             meta={"doc_id": doc["doc_id"], "doc_type": doc["doc_type"], "date": doc["date"], "section": section,
-                  "page_start": page, "page_end": page},
+                  "page_start": page, "page_end": page, "unit": "page"},
         )
 
     def add_web(self, url: str, title: str, text: str, published: str | None = None, kind: str = "page") -> Evidence:

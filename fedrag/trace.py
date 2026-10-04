@@ -34,6 +34,15 @@ class Trace:
                 pass
         return ev
 
+    def stream(self, agent: str, text: str) -> None:
+        """Transient token-stream event for live displays; not kept in the trace."""
+        ev = Event(t=round(time.time() - self.t0, 2), agent=agent, type="delta", data={"text": text})
+        for fn in self.listeners:
+            try:
+                fn(ev)
+            except Exception:
+                pass
+
     def to_list(self) -> list[dict]:
         return [asdict(e) for e in self.events]
 

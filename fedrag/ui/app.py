@@ -79,6 +79,7 @@ class TraceView:
         self.msgs: list[gr.ChatMessage] = []
         self.open: dict[str, gr.ChatMessage] = {}
         self.calls: dict[int, list[list[str]]] = {}  # panel id -> [[tool, call line, result ids], ...]
+        self.drafts: dict[str, str] = {}  # streamed writer text per panel key
         self.n = 0
 
     def _render_calls(self, m: gr.ChatMessage, tail: str = "") -> None:
@@ -91,6 +92,7 @@ class TraceView:
                                                                    "status": "pending", "id": self.n})
         self.msgs.append(m)
         self.open[key] = m
+        self.drafts.pop(key, None)
         return m
 
     def add(self, ev: Event) -> None:
@@ -144,10 +146,17 @@ class TraceView:
                 issues = "\n".join(f"- {i}" for i in d.get("issues", [])) or "- none"
                 m.content = f"**Verdict: {d['verdict']}**\n{issues}"
                 m.metadata["status"] = "done"
+        elif ev.type == "delta":
+            k = "synthesizer:" if a == "synthesizer" else "direct:"
+            m = self.open.get(k)
+            if m is not None:
+                self.drafts[k] = self.drafts.get(k, "") + d["text"]
+                m.content = self.drafts[k]
         elif ev.type == "synthesis":
             m = self.open.get("synthesizer:")
             if m is not None:
-                m.content = "Draft ready." if not d.get("revised") else "Revised draft ready."
+                m.content = self.drafts.get("synthesizer:") or ("Revised draft ready." if d.get("revised")
+                                                               else "Draft ready.")
                 m.metadata["status"] = "done"
         elif ev.type in ("info", "error"):
             self.n += 1

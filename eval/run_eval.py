@@ -69,6 +69,8 @@ def routing_ok(q: dict, used: list[str]) -> bool:
     used_tools = set(used) & TOOL_AGENTS
     if not set(q["expected_agents"]) <= used_tools:
         return False
+    if q.get("any_of_agents") and not set(q["any_of_agents"]) & used_tools:
+        return False
     if set(q.get("forbidden_agents", [])) & used_tools:
         return False
     return True
@@ -130,6 +132,7 @@ async def main() -> None:
     ap.add_argument("--category")
     ap.add_argument("-c", "--concurrency", type=int, default=3)
     ap.add_argument("--no-verify", action="store_true")
+    ap.add_argument("--thinking", action="store_true", help="enable the LLM's thinking mode for specialist agents")
     ap.add_argument("--rescore", help="re-judge answers from a saved results file")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
@@ -147,7 +150,7 @@ async def main() -> None:
         records = [json.loads(line) for line in open(args.rescore)]
         llm = LLM()
     else:
-        orch = Orchestrator(verify=not args.no_verify)
+        orch = Orchestrator(verify=not args.no_verify, thinking=args.thinking)
         llm = orch.llm
         print(f"running {len(questions)} questions (concurrency {args.concurrency})")
         sem = asyncio.Semaphore(args.concurrency)

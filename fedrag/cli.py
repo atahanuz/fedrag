@@ -82,10 +82,10 @@ def print_result(res, show_sources: bool = True) -> None:
                   f"({u['prompt_tokens']:,} in / {u['completion_tokens']:,} out) | tools {u['tool_calls']}[/dim]")
 
 
-async def _ask(question: str, verbose: bool, no_verify: bool, save: str | None) -> None:
+async def _ask(question: str, verbose: bool, no_verify: bool, save: str | None, thinking: bool) -> None:
     from .orchestrator import Orchestrator
 
-    orch = Orchestrator(verify=not no_verify)
+    orch = Orchestrator(verify=not no_verify, thinking=thinking)
     console.print(f"[bold]Q:[/bold] {question}\n")
     res = await orch.run(question, listeners=[live_printer(verbose)])
     print_result(res)
@@ -144,6 +144,7 @@ def main(argv: list[str] | None = None) -> None:
     a.add_argument("-v", "--verbose", action="store_true", help="show tool results and agent thoughts")
     a.add_argument("--no-verify", action="store_true", help="skip the fact-checking step")
     a.add_argument("--save", help="write the full run (answer, sources, trace) to this JSON file")
+    a.add_argument("--thinking", action="store_true", help="let specialist agents use the LLM's thinking mode")
     c = sub.add_parser("chat", help="interactive multi-turn session")
     c.add_argument("-v", "--verbose", action="store_true")
     sub.add_parser("status", help="check gateway, LLM and index")
@@ -155,7 +156,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
     if args.cmd == "ask":
-        asyncio.run(_ask(" ".join(args.question), args.verbose, args.no_verify, args.save))
+        asyncio.run(_ask(" ".join(args.question), args.verbose, args.no_verify, args.save, args.thinking))
     elif args.cmd == "chat":
         asyncio.run(_chat(args.verbose))
     elif args.cmd == "status":

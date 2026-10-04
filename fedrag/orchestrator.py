@@ -103,7 +103,8 @@ class Orchestrator:
 
             if not plan.needs_tools:
                 trace.emit("direct", "agent_start", task="answer from general knowledge")
-                answer = await direct_answer(self.llm, question, today_s, history_note)
+                answer = await direct_answer(self.llm, question, today_s, history_note,
+                                             on_delta=(lambda d: trace.stream("direct", d)) if listeners else None)
                 trace.emit("direct", "final", answer=answer)
                 return self._result(question, answer, ctx, plan, [], [], usage, t0)
 
@@ -117,8 +118,9 @@ class Orchestrator:
                 fb = Task(id="fallback", agent="web_research", instruction=q)
                 results += await self._execute(ctx, [fb], specialists)
 
+            stream = (lambda d: trace.stream("synthesizer", d)) if listeners else None
             trace.emit("synthesizer", "agent_start", task="write the cited answer")
-            draft = await synthesize(self.llm, question, today_s, results, ctx.evidence, history_note)
+            draft = await synthesize(self.llm, question, today_s, results, ctx.evidence, history_note, stream)
             trace.emit("synthesizer", "synthesis", answer=draft)
 
             verifications: list[dict] = []
@@ -137,12 +139,14 @@ class Orchestrator:
                               if t.get("agent") in specialists and t.get("instruction")]
                     results += await self._execute(ctx, follow, specialists)
                     trace.emit("synthesizer", "agent_start", task="rewrite with the new findings")
-                    draft = await synthesize(self.llm, question, today_s, results, ctx.evidence, history_note)
+                    draft = await synthesize(self.llm, question, today_s, results, ctx.evidence, history_note,
+                                             stream)
                     trace.emit("synthesizer", "synthesis", answer=draft)
                     continue
                 if v["issues"]:
                     trace.emit("synthesizer", "agent_start", task="revise per fact-check")
-                    draft = await revise(self.llm, question, today_s, draft, v["issues"], results, ctx.evidence)
+                    draft = await revise(self.llm, question, today_s, draft, v["issues"], results, ctx.evidence,
+                                         stream)
                     trace.emit("synthesizer", "synthesis", answer=draft, revised=True)
                 break
             return self._result(question, draft, ctx, plan, results, verifications, usage, t0)

@@ -14,7 +14,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
@@ -123,7 +123,13 @@ class LLM:
         schema_name: str = "output",
         presence_penalty: float = 0.0,
         retries: int = 3,
+        on_delta: Callable[[str], None] | None = None,
     ) -> LLMResponse:
+        """``on_delta`` streams the text as it is generated (plain-text calls only)."""
+        if on_delta is not None and not tools and json_schema is None:
+            return await self._chat_stream(messages, agent=agent, thinking=thinking, temperature=temperature,
+                                           top_p=top_p, max_tokens=max_tokens, presence_penalty=presence_penalty,
+                                           retries=retries, on_delta=on_delta)
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -188,6 +194,52 @@ class LLM:
             completion_tokens=getattr(resp.usage, "completion_tokens", 0) or 0,
             latency=latency,
         )
+        self.usage.add(agent, out)
+        if (u := run_usage.get()) is not None:
+            u.add(agent, out)
+        return out
+
+    async def _chat_stream(self, messages: list[dict], *, agent: str, thinking: bool, temperature: float,
+                           top_p: float, max_tokens: int, presence_penalty: float, retries: int,
+                           on_delta: Callable[[str], None]) -> LLMResponse:
+        extra: dict[str, Any] = {"top_k": 20}
+        if config.LLM_SUPPORTS_THINKING_FLAG:
+            extra["chat_template_kwargs"] = {"enable_thinking": thinking}
+        last_err: Exception | None = None
+        for attempt in range(retries):
+            t0 = time.time()
+            parts: list[str] = []
+            usage = None
+            finish = None
+            try:
+                async with self.sem:
+                    stream = await self.client.chat.completions.create(
+                        model=self.model, messages=messages, temperature=temperature, top_p=top_p,
+                        max_tokens=max_tokens, presence_penalty=presence_penalty, extra_body=extra,
+                        stream=True, stream_options={"include_usage": True})
+                    async for chunk in stream:
+                        if chunk.usage is not None:
+                            usage = chunk.usage
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta.content or ""
+                        finish = chunk.choices[0].finish_reason or finish
+                        if delta:
+                            parts.append(delta)
+                            on_delta(delta)
+                break
+            except (APIConnectionError, APITimeoutError, APIStatusError) as e:
+                if isinstance(e, APIStatusError) and e.status_code < 500 and e.status_code != 429:
+                    raise
+                last_err = e
+                if parts:  # partial output already shown; do not duplicate it on retry
+                    break
+                await asyncio.sleep(2.0 * (attempt + 1))
+        else:
+            raise RuntimeError(f"LLM unavailable after {retries} attempts: {last_err}")
+        out = LLMResponse(content="".join(parts).strip(), tool_calls=[], reasoning=None, finish_reason=finish,
+                          prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                          completion_tokens=getattr(usage, "completion_tokens", 0) or 0, latency=time.time() - t0)
         self.usage.add(agent, out)
         if (u := run_usage.get()) is not None:
             u.add(agent, out)
