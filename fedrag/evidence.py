@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .retrieval.text_format import citation_label
+from .retrieval.text_format import citation_label, locator
 
 
 @dataclass
@@ -26,7 +26,7 @@ class Evidence:
     meta: dict = field(default_factory=dict)
 
     def render(self, max_chars: int = 2500) -> str:
-        if self.meta.get("unit") == "page":  # a full page (often a table) the agent chose to read
+        if self.meta.get("full_page"):  # a full page or a query result the agent chose to read
             max_chars *= 2
         body = self.text if len(self.text) <= max_chars else self.text[:max_chars] + " ..."
         return f"[{self.id}] {self.source}\n{body}"
@@ -55,17 +55,35 @@ class EvidenceStore:
         return ev
 
     def add_chunk(self, c: dict) -> Evidence:
-        return self._add(
-            f"chunk:{c['chunk_id']}", "doc", title=c["title"], text=c["text"], source=citation_label(c),
-            meta={k: c[k] for k in ("chunk_id", "doc_id", "doc_type", "date", "section", "page_start", "page_end")},
-        )
+        meta = {k: c[k] for k in ("chunk_id", "doc_id", "doc_type", "date", "section", "page_start", "page_end")}
+        meta["unit"] = c.get("unit", "page")
+        if c.get("kind") == "table":
+            meta["table"] = c["table"]
+        return self._add(f"chunk:{c['chunk_id']}", "doc", title=c["title"], text=c["text"],
+                         source=citation_label(c), meta=meta)
 
     def add_page(self, doc: dict, page: int, text: str, section: str = "") -> Evidence:
+        unit = doc.get("page_unit", "page")
         return self._add(
             f"page:{doc['doc_id']}:{page}", "doc", title=doc["title"], text=text,
-            source=f"{doc['title']}, p. {page}", url=doc.get("url"),
+            source=f"{doc['title']}, {locator(unit, page)}", url=doc.get("url"),
             meta={"doc_id": doc["doc_id"], "doc_type": doc["doc_type"], "date": doc["date"], "section": section,
-                  "page_start": page, "page_end": page, "unit": "page"},
+                  "page_start": page, "page_end": page, "unit": unit, "full_page": True},
+        )
+
+    def add_query(self, sql: str, result: str, tables: list[dict], docs: list[dict]) -> Evidence:
+        """The result of a SQL query over the collection's tables (cited like any document passage)."""
+        names = ", ".join(f"`{t['table']}`" for t in tables) or "tables"
+        first = docs[0] if docs else {}
+        source = (f"{first.get('title', 'Federal Reserve data')} ({first.get('date', '')}), SQL query over {names}"
+                  + (f" and {len(docs) - 1} other document(s)" if len(docs) > 1 else ""))
+        key = re.sub(r"\s+", " ", sql.strip().lower())
+        return self._add(
+            f"sql:{key}", "doc", title=first.get("title", "SQL query"), text=f"SQL: {sql}\nResult:\n{result}",
+            source=source, url=first.get("url"),
+            meta={"doc_id": first.get("doc_id", ""), "doc_type": first.get("doc_type", ""),
+                  "date": first.get("date", ""), "unit": "query", "tables": [t["table"] for t in tables],
+                  "doc_ids": [d["doc_id"] for d in docs], "sql": sql, "full_page": True},
         )
 
     def add_web(self, url: str, title: str, text: str, published: str | None = None, kind: str = "page") -> Evidence:

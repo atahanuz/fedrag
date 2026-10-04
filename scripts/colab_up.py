@@ -104,6 +104,7 @@ print(r.stdout.decode('utf-8', 'replace'))
 
 
 def ensure_embeddings(session: str) -> None:
+    """Embed the chunks that have no vector yet; vectors of unchanged chunks are reused (matched by text hash)."""
     sys.path.insert(0, str(ROOT))
     from fedrag import config
 
@@ -112,13 +113,21 @@ def ensure_embeddings(session: str) -> None:
     if emb_path.exists() and ids_path.exists() and json.load(open(ids_path))["ids"] == chunk_ids:
         print("local embeddings match the corpus; skipping embedding job")
         return
-    print("embedding the corpus on the GPU ...")
-    subprocess.run([sys.executable, "-m", "fedrag.retrieval.index", "prepare"], cwd=ROOT, check=True)
-    colab_s(session, "upload", str(config.INDEX_DIR / "embed_input.jsonl"), "/content/embed_input.jsonl")
-    run_detached(session, "embed_corpus.py", ["/content/embed_input.jsonl", "/content/index_out"], "embed.log")
-    wait_for(session, "embed.log", "EMBED_DONE", 1800, "corpus embedding")
-    colab_s(session, "download", "/content/index_out/embeddings.npy", str(emb_path))
-    colab_s(session, "download", "/content/index_out/ids.json", str(ids_path))
+    py = [sys.executable, "-m", "fedrag.retrieval.index"]
+    subprocess.run(py + ["prepare"], cwd=ROOT, check=True)
+    todo = config.INDEX_DIR / "embed_input.jsonl"
+    new_dir = config.INDEX_DIR / "new"
+    if sum(1 for _ in open(todo)):
+        print("embedding the new chunks on the GPU ...")
+        colab_s(session, "upload", str(todo), "/content/embed_input.jsonl")
+        vm_exec(session, "import os, shutil; shutil.rmtree('/content/index_out', ignore_errors=True); "
+                         "os.path.exists('/content/logs/embed.log') and os.remove('/content/logs/embed.log')")
+        run_detached(session, "embed_corpus.py", ["/content/embed_input.jsonl", "/content/index_out"], "embed.log")
+        wait_for(session, "embed.log", "EMBED_DONE", 1800, "corpus embedding")
+        new_dir.mkdir(parents=True, exist_ok=True)
+        colab_s(session, "download", "/content/index_out/embeddings.npy", str(new_dir / "embeddings.npy"))
+        colab_s(session, "download", "/content/index_out/ids.json", str(new_dir / "ids.json"))
+    subprocess.run(py + ["merge", "--new", str(new_dir)], cwd=ROOT, check=True)
 
 
 def write_env(session: str) -> dict:

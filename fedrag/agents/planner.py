@@ -8,11 +8,13 @@ from dataclasses import dataclass, field
 from ..llm import LLM
 from . import prompts
 
+AGENTS = ("fed_research", "data_analyst", "web_research", "market_data")
+
 TASK_SCHEMA = {
     "type": "object",
     "properties": {
         "id": {"type": "string"},
-        "agent": {"type": "string", "enum": ["fed_research", "web_research", "market_data"]},
+        "agent": {"type": "string", "enum": ["fed_research", "data_analyst", "web_research", "market_data"]},
         "instruction": {"type": "string"},
         "depends_on": {"type": "array", "items": {"type": "string"}},
     },
@@ -47,6 +49,16 @@ Q: Did the Fed raise rates in September 2026, and did the July minutes foreshado
 -> intent mixed; tasks: [web_research: "FOMC decision at the September 2026 meeting (target range, vote,
    date)", fed_research: "July 2026 FOMC minutes: participants' views on the future path of policy, e.g.
    possible rate increases"]
+Q: Which five banks had the lowest projected minimum CET1 ratios in the 2026 stress test, and how did those
+   banks fare in 2025?
+-> intent fed_documents; tasks: [data_analyst: "In the stress-test results table (DFAST 2013-2026), rank banks
+   by projected minimum CET1 ratio under the 2026 severely adverse scenario (five lowest) and give the same
+   banks' 2025 values."]
+Q: How has the median FOMC projection for the end-2026 federal funds rate changed over the past year, and how
+   did the Chair explain the September 2026 decision?
+-> intent fed_documents; tasks: [data_analyst: "From the SEP Table 1 view across meetings, the median federal
+   funds rate projection for 2026 at each meeting from September 2025 to September 2026.", fed_research:
+   "September 16, 2026 FOMC statement and the Chair's press conference: the decision and its rationale."]
 Q: What is the euro worth in dollars today and how does the fed funds rate compare with ECB rates?
 -> intent mixed; tasks: [market_data: "Latest EUR/USD rate and the current fed funds target range
    (DFEDTARL/DFEDTARU)", web_research: "Current ECB key interest rates (deposit facility rate) and the date
@@ -88,9 +100,10 @@ def _history_block(history: list[dict] | None, max_turns: int = 3) -> str:
     return "Conversation so far (most recent last):\n" + "\n\n".join(lines) + "\n\n"
 
 
-async def make_plan(llm: LLM, question: str, today: str, corpus_card: str,
-                    history: list[dict] | None = None) -> Plan:
-    system = prompts.PLANNER.format(today=today, corpus_card=corpus_card) + "\n\n" + EXAMPLES
+async def make_plan(llm: LLM, question: str, today: str, corpus_card: str, history: list[dict] | None = None,
+                    dataset_card: str = "", n_docs: int = 0, n_tables: int = 0) -> Plan:
+    system = prompts.PLANNER.format(today=today, corpus_card=corpus_card, dataset_card=dataset_card, n_docs=n_docs,
+                                    n_tables=n_tables) + "\n\n" + EXAMPLES
     user = f"{_history_block(history)}New user question: {question}\n\nReturn the plan as JSON."
     data = await llm.chat_json(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -98,7 +111,7 @@ async def make_plan(llm: LLM, question: str, today: str, corpus_card: str,
     )
     tasks = []
     for i, t in enumerate(data.get("tasks") or []):
-        if t.get("agent") not in ("fed_research", "web_research", "market_data") or not t.get("instruction"):
+        if t.get("agent") not in AGENTS or not t.get("instruction"):
             continue
         tasks.append(Task(id=t.get("id") or f"t{i + 1}", agent=t["agent"], instruction=t["instruction"],
                           depends_on=[d for d in t.get("depends_on") or []]))

@@ -18,9 +18,10 @@ import gradio as gr
 from ..orchestrator import Orchestrator, RunResult
 from ..trace import Event
 
-ICONS = {"planner": "🧭", "fed_research": "🏛️", "web_research": "🌐", "market_data": "📈",
+ICONS = {"planner": "🧭", "fed_research": "🏛️", "data_analyst": "🧮", "web_research": "🌐", "market_data": "📈",
          "synthesizer": "✍️", "verifier": "🔍", "direct": "💬", "orchestrator": "⚙️"}
-LABELS = {"planner": "Planner", "fed_research": "Fed document research", "web_research": "Web research",
+LABELS = {"planner": "Planner", "fed_research": "Fed document research", "data_analyst": "Fed data analyst (SQL)",
+          "web_research": "Web research",
           "market_data": "Market & economic data", "synthesizer": "Writer", "verifier": "Fact-checker",
           "direct": "Direct answer", "orchestrator": "Orchestrator"}
 

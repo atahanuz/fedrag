@@ -2,7 +2,7 @@
 
     question
       -> planner (route + decompose into tasks)
-      -> specialists run in parallel waves (fed_research / web_research / market_data),
+      -> specialists run in parallel waves (fed_research / data_analyst / web_research / market_data),
          each a ReAct tool-calling loop
       -> corrective fallback to web search when the collection had nothing
       -> synthesizer writes a cited answer
@@ -98,7 +98,9 @@ class Orchestrator:
         today_s = today.strftime("%A, %B %d, %Y")
         try:
             trace.emit("planner", "agent_start", task="route and decompose the question")
-            plan = await make_plan(self.llm, question, today_s, self.index.corpus_card(), history)
+            plan = await make_plan(self.llm, question, today_s, self.index.corpus_card(), history,
+                                   dataset_card=self.index.dataset_card(), n_docs=len(self.index.docs),
+                                   n_tables=sum(1 for t in self.index.tables.catalog.values() if t["kind"] == "table"))
             trace.emit("planner", "plan", **plan.as_dict())
             q = plan.standalone_question or question
             history_note = "" if q == question else f"(Standalone form of the question: {q})\n"
@@ -190,7 +192,9 @@ def finalize(draft: str, store: EvidenceStore, index: CorpusIndex | None = None)
         if ev.kind == "doc" and index is not None:
             doc = index.docs.get(ev.meta.get("doc_id", ""))
             if doc:
-                url = f"{doc['url']}#page={ev.meta.get('page_start', 1)}"
+                url = doc["url"]
+                if doc.get("format", "pdf") == "pdf" and ev.meta.get("unit", "page") == "page":
+                    url += f"#page={ev.meta.get('page_start', 1)}"
         sources.append({"id": eid, "kind": ev.kind, "title": ev.title, "source": ev.source, "url": url,
                         "excerpt": ev.text[:600], "meta": ev.meta})
     return answer, sources

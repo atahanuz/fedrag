@@ -17,8 +17,14 @@ venv/
 .env
 *.token
 
-# Large source documents (public-domain PDFs; re-download via metadata.csv urls)
+# Source documents (public domain; scripts/fetch_corpus.py re-downloads them from metadata.csv)
 federal_reserve/*.pdf
+federal_reserve/*.html
+federal_reserve/*.docx
+federal_reserve/*.xlsx
+federal_reserve/*.xls
+federal_reserve/*.csv
+!federal_reserve/metadata.csv
 
 # Generated artifacts (rebuild with `python -m fedrag.ingest.build_corpus` + gpu_server/embed_corpus.py)
 data/

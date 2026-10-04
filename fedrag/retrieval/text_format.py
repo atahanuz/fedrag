@@ -23,6 +23,17 @@ def rerank_text(c: dict, max_chars: int = 3000) -> str:
     return f"{chunk_header(c)}\n{c['text'][:max_chars]}"
 
 
+def locator(unit: str, start: int, end: int | None = None) -> str:
+    """'p. 4' / 'pp. 4-5' for PDF pages, 'part 2' / 'parts 2-3' for web pages and Word files."""
+    end = end or start
+    if unit == "page":
+        return f"p. {start}" if start == end else f"pp. {start}-{end}"
+    if unit == "table":
+        return f"table {start}"
+    return f"part {start}" if start == end else f"parts {start}-{end}"
+
+
 def citation_label(c: dict) -> str:
-    pages = f"p. {c['page_start']}" if c["page_start"] == c["page_end"] else f"pp. {c['page_start']}-{c['page_end']}"
-    return f"{c['title']}, {pages}"
+    if c.get("kind") == "table":
+        return f"{c['title']}, data table `{c['table']}`"
+    return f"{c['title']}, {locator(c.get('unit', 'page'), c['page_start'], c['page_end'])}"

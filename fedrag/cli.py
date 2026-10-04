@@ -26,7 +26,8 @@ from .trace import Event
 console = Console()
 
 AGENT_STYLE = {
-    "planner": "bold magenta", "fed_research": "bold cyan", "web_research": "bold green",
+    "planner": "bold magenta", "fed_research": "bold cyan", "data_analyst": "bold bright_cyan",
+    "web_research": "bold green",
     "market_data": "bold yellow", "synthesizer": "bold blue", "verifier": "bold red",
     "direct": "bold white", "orchestrator": "dim",
 }

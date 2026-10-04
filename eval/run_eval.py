@@ -31,7 +31,7 @@ from fedrag.orchestrator import Orchestrator  # noqa: E402
 from fedrag.retrieval.text_format import citation_label  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-TOOL_AGENTS = {"fed_research", "web_research", "market_data"}
+TOOL_AGENTS = {"fed_research", "data_analyst", "web_research", "market_data"}
 
 JUDGE_SYSTEM = """You grade answers of a research assistant about the Federal Reserve, economics and finance.
 Today's date is {today}. Compare the assistant's answer with the reference answer written by an expert.

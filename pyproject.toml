@@ -1,7 +1,7 @@
 [project]
 name = "fedrag"
 version = "0.1.0"
-description = "Agentic RAG over Federal Reserve publications with web search and live market-data agents"
+description = "Agentic RAG over a mixed-format Federal Reserve collection (PDF, web, Word, Excel, CSV) with SQL, web search and live market-data agents"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
@@ -18,6 +18,10 @@ dependencies = [
     "lxml>=5.0",
     "pandas>=2.0",
     "yfinance>=0.2.40",
+    "python-docx>=1.1",   # Word documents
+    "openpyxl>=3.1",      # Excel .xlsx
+    "xlrd>=2.0",          # Excel .xls
+    "duckdb>=1.1",        # SQL over the extracted tables
 ]
 
 [project.optional-dependencies]
