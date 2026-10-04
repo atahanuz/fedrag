@@ -360,7 +360,6 @@ def _drop_chart_axis_rows(rows: list[Row]) -> list[Row]:
     rows that carry text labels. Chart axes produce runs of numeric-only rows.
     """
     out = []
-    n = len(rows)
     for i, r in enumerate(rows):
         if r.is_table and is_numeric_noise(r.text):
             neighbours = rows[max(0, i - 2): i] + rows[i + 1: i + 3]

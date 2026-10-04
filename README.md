@@ -99,7 +99,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[ui
 #    Creates the session, installs vLLM, downloads models, embeds the corpus if data/index/ is missing,
 #    starts gateway + vLLM + tunnel, writes FEDRAG_GPU_URL / FEDRAG_API_KEY to .env, then keeps the VM
 #    alive while it is used.
-.venv/bin/python scripts/colab_up.py          # about 12 min on a fresh VM
+.venv/bin/python scripts/colab_up.py          # about 13 min on a fresh VM
 .venv/bin/python -m fedrag status             # gateway, LLM and index check
 ```
 
