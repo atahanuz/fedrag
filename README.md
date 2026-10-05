@@ -74,7 +74,8 @@ flowchart LR
 ### The collection
 
 `federal_reserve/README.md` describes it in detail: 103 PDFs, 264 web pages, 2 Word files, 5 Excel
-workbooks (318 sheets) and 17 CSV files; 387 from the Board, 4 from the New York and Philadelphia Feds.
+workbooks (310 sheets, 36 of them charts) and 17 CSV files; 387 from the Board, 4 from the New York and
+Philadelphia Feds.
 `scripts/fetch_corpus.py --discover` crawled the Board's indexes (press releases, speeches, testimony,
 FEDS Notes, SR letters, SLOOS, the FOMC calendar) and a curated list of data files to grow the original 93
 PDFs; `metadata.csv` records each file's URL, SHA-256, format, publisher, speaker and, for data files whose
@@ -137,7 +138,7 @@ outline, table blocks), so sectioning, chunking, retrieval and citation work the
 | Role | Model | Notes |
 | --- | --- | --- |
 | LLM for every agent | `Qwen/Qwen3.8-27B-FP8` via vLLM 0.30 | tool calling (`qwen3_xml` parser), JSON-schema output, MTP speculative decoding, about 95 tok/s per stream, 64K context, thinking mode off |
-| Embeddings | `Qwen/Qwen3-Embedding-8B` | corpus embedded once on the GPU (about 6 min); queries use an instruction prefix |
+| Embeddings | `Qwen/Qwen3-Embedding-8B` | chunks embedded on the GPU once, then only new or changed ones (4,073 new chunks: about 5 min); queries use an instruction prefix |
 | Reranker | `Qwen/Qwen3-Reranker-4B` | P("yes") relevance; about 2 s for 40 passages |
 
 Qwen3.8-27B was chosen because it was the strongest instruction-following and agentic model that fits
@@ -160,7 +161,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[ui
 #    Creates the session, installs vLLM, downloads models, embeds the chunks that have no embedding yet,
 #    starts gateway + vLLM + tunnel + keeper, writes FEDRAG_GPU_URL / FEDRAG_API_KEY to .env, and leaves
 #    a heartbeat running in the background.
-.venv/bin/python scripts/colab_up.py          # about 15 min on a fresh VM
+.venv/bin/python scripts/colab_up.py          # 13-20 min on a fresh VM (20 with 4,073 chunks to embed)
 .venv/bin/python -m fedrag status             # gateway, LLM and index check
 ```
 
@@ -202,29 +203,31 @@ heartbeat and token refresh (without the keeper).
 The web UI streams every agent as a collapsible panel listing its tool calls and findings, and links each
 citation to its source.
 
-Real trace (abridged, from the evaluation): a cross-format question. The planner gives the Bulletin (PDF)
-to `fed_research` and the Excel tables to `data_analyst`; they run in parallel, and the SQL result is cited
-like a page.
+Real trace (abridged, question `cf01` in `eval/results/final_agentic.jsonl`): a cross-format question. The
+planner gives the Bulletin (PDF) to `fed_research` and the Excel tables to `data_analyst`; they run in
+parallel, and the SQL result is cited like a page.
 
 ```
-     planner   13.7s intent=fed_documents tasks=2 — The question asks for two specific data points from the SCF ...
+     planner    9.4s intent=fed_documents tasks=2 — The question asks for two specific data points from the SCF ...
                      • fed_research t1: In the document 'Changes in U.S. Family Finances from 2019 to 2022' ...
-                     • data_analyst t2: Query the SCF historical tables for median net worth in 2019 and 2022 ...
-fed_research   19.0s   ↳ search_fed_documents({"query": "median family net worth 2019 2022", "doc_types": ["household_survey"]})
-data_analyst   19.1s   ↳ search_tables({"query": "median family net worth by year SCF historical", "max_tables": 8})
-data_analyst   38.5s   ↳ describe_table({"table": "scf_2022_hist_tables_real__table_4"})
-fed_research   38.6s   ↳ get_document_outline({"doc_id": "fed_scf_bulletin_2023-10"})
-data_analyst   44.4s   ↳ query_data({"sql": "SELECT h1 AS survey_year, h2 AS statistic, value FROM scf_2022_hist_tables_real__table_4 ..."})
-fed_research   52.1s   ↳ read_document_pages({"doc_id": "fed_scf_bulletin_2023-10", "start_page": 17, "end_page": 18})
-data_analyst   59.0s ✔ confidence=high evidence=1 steps=4 tools=4
-fed_research   62.0s ✔ confidence=high evidence=2 steps=4 tools=5
- synthesizer   62.0s ▶ write the cited answer
-    verifier   87.4s verdict=accept
+                     • data_analyst t2: Query the SCF historical tables in 2022 dollars ...
+fed_research   15.8s   ↳ search_fed_documents({"query": "median family net worth 2019 2022 change", "doc_types": ["household_survey"]})
+data_analyst   15.9s   ↳ search_tables({"query": "median family net worth by year Survey of Consumer Finances", "max_tables": 10})
+data_analyst   15.9s   ↳ list_tables({"title_contains": "net worth"})
+data_analyst   31.4s   ↳ describe_table({"table": "scf_2022_hist_tables_real__table_4"})
+fed_research   34.9s   ↳ get_document_outline({"doc_id": "fed_scf_bulletin_2023-10"})
+data_analyst   36.6s   ↳ query_data({"sql": "SELECT row_group, row_label, h1, h2, value, value_text FROM scf_2022_hist_tables_real__table_4 WHE…"})
+data_analyst   45.0s   ↳ calculator({"expression": "(192.7 - 141.14) / 141.14 * 100"})
+fed_research   49.4s   ↳ read_document_pages({"doc_id": "fed_scf_bulletin_2023-10", "start_page": 17, "end_page": 19})
+data_analyst   57.2s ✔ confidence=high evidence=1 steps=5 tools=6
+fed_research   62.3s ✔ confidence=high evidence=3 steps=5 tools=6
+ synthesizer   62.3s ▶ write the cited answer
+    verifier   78.7s verdict=accept
 ```
 
-> Median family net worth increased by 37 percent, rising from $141,100 in 2019 to $192,900 in 2022 (in 2022
-> dollars) [D9][D10]. The SCF historical Excel tables show nearly identical figures: $141,140 in 2019 and
-> $192,700 in 2022 [D8]. ...
+> Median family net worth rose from $141,100 in 2019 to $192,900 in 2022, a 37 percent increase, according
+> to the October 2023 SCF Bulletin [D8][D9]. The SCF historical Excel tables in 2022 dollars show a very
+> similar comparison: $141,140 in 2019 and $192,700 in 2022, a 36.53 percent increase [D7]. ...
 
 ## Evaluation
 
@@ -241,48 +244,68 @@ conference). `eval/run_eval.py` scores:
 - **grounding:** the share of tool-based answers that carry citations;
 - **cost:** latency, LLM calls and tool calls.
 
-### Results (final run, 2026-10-04)
+### Results (two final runs, 2026-10-05, 391-document collection)
 
 The agentic system is compared with a **naive RAG baseline** that uses the same retrieval stack (hybrid
-search and reranker) and the same LLM, but makes one retrieval and one LLM call (`run_eval.py --naive`):
+search and reranker over the same chunks and table cards) and the same LLM, but makes one retrieval and one
+LLM call (`run_eval.py --naive`). The final system was run twice on all 52 questions (runs A and B):
 
-| Category | n | Routing | Fully correct: agentic | Fully correct: naive RAG | Median latency* | LLM calls / tool calls |
+| Category | n | Routing | Fully correct: run A / run B | Naive RAG | Median latency* (A) | LLM calls / tool calls (A) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Fed documents, single fact | 10 | 100% | **90%** | 90% | 64 s | 7.0 / 4.4 |
-| Fed documents, multi-document comparison | 4 | 100% | **100%** | 25% | 107 s | 13.8 / 9.5 |
-| Live data (FX, FRED, prices) | 4 | 100% | **100%** | 0% | 29 s | 6.0 / 2.2 |
-| Web / current events | 4 | 100% | **100%** | 0% | 53 s | 7.0 / 4.5 |
-| Mixed (documents + web/data) | 4 | 100% | **100%** | 0% | 108 s | 9.8 / 8.2 |
-| General knowledge / chit-chat | 4 | 100% | **100%** | 50% | 7 s | 2.0 / 0.0 |
-| Outside the collection | 2 | 100% | **100%** | 0% | 89 s | 12.0 / 9.5 |
-| **Overall** | **32** | **100%** | **97%** (mean score 0.98) | 38% (0.47) | 60 s | 7.8 / 5.0 |
+| Fed documents, single fact | 10 | 100% | 90% / 100% | 70% | 87 s | 8.1 / 5.4 |
+| Fed documents, multi-document comparison | 4 | 100% | 100% / 100% | 25% | 126 s | 14.0 / 13.0 |
+| **Structured data (Excel / CSV via SQL)** | 9 | 100% | **100% / 100%** | 33% | 36 s | 6.8 / 4.0 |
+| **Word documents** | 2 | 100% | **100% / 100%** | 100% | 53 s | 6.0 / 3.0 |
+| **Web pages (speeches, testimony, SLOOS, SR letters, notes)** | 6 | 100% | 67% / 83% | 33% | 87 s | 6.8 / 3.8 |
+| **Across formats** | 3 | 100% | 67% / 67% | 33% | 70 s | 10.3 / 8.0 |
+| Live data (FX, FRED, prices) | 4 | 100% | 100% / 100% | 0% | 28 s | 5.8 / 2.2 |
+| Web / current events | 4 | 100% | 100% / 100% | 25% | 63 s | 8.2 / 6.0 |
+| Mixed (documents + web/data) | 4 | 100% | 100% / 75% | 50% | 126 s | 11.0 / 11.0 |
+| General knowledge / chit-chat | 4 | 100% | 100% / 100% | 50% | 10 s | 2.0 / 0.0 |
+| Outside the collection | 2 | 100% | 50% / 50% | 50% | 92 s | 8.5 / 7.0 |
+| **Overall** | **52** | **100%** | **90% / 92%** (mean score 0.95 / 0.95) | 42% (0.59) | 64 s | 7.8 / 5.5 |
 
-\*Measured with 4 questions running at once on one A100. A single question on its own usually takes
-20–40 s (documents), 10–30 s (live data), 35–65 s (mixed) or 3–10 s (general knowledge). Every
-tool-based answer carried citations. The answers, judge verdicts and full agent traces of both runs are in
-`eval/results/final_agentic.jsonl` and `eval/results/final_naive_rag.jsonl`.
+\*Measured with 4 questions running at once on one A100. Every tool-based answer carried citations. Run A
+used `fed_research` in 26 questions, `data_analyst` in 14, `web_research` in 7 and `market_data` in 7. The
+answers, judge verdicts and full agent traces are in `eval/results/final_agentic.jsonl` (run A),
+`final_agentic_b.jsonl` (run B) and `final_naive_rag.jsonl`; the previous evaluation on the 93-PDF
+collection is in `final_93docs_*`.
 
 What the numbers show:
 
-- Naive RAG does well on single-fact lookups because the retrieval is strong. It fails as soon as a
-  question needs several documents (dissents across five FOMC meetings), live numbers, events after the
-  collection ends, or no retrieval at all. It names Jerome Powell as the current chair and gives the 2024
-  fed funds range as current; it also refuses "What is the capital of Australia?" because the context
-  doesn't contain it.
-- Every answer in the final run was also checked by hand. All 32 have the correct main answer; the
-  single partial score (`fd06`) left out one of four points in the reference. In one comparison answer the agents also
-  noticed that the 2026 stress-test report restates the 2025 projected minimum as 11.5% (the 2025 report
-  says 11.6%), and reported both.
+- **The new questions** (data files, Word, web pages, cross-format): 17/20 and 18/20 fully correct, naive
+  RAG 8/20. All nine structured-data questions were right in both runs: rankings over the bank-level
+  stress-test CSV, time series across 13 SEP releases, the NY Fed and SPF workbooks (where `UNEMPB` is only
+  explained in the SPF's PDF documentation, which the agent looked up). Naive RAG answers a structured
+  question only when a small table's rows happen to be in a retrieved card.
+- **No regression from a 4x larger collection.** The original 32 questions scored 30/32 in both runs,
+  against 31/32 on the 93-PDF collection (naive RAG: 14/32 against 12/32).
+- **Remaining misses are partial answers.** Every partial and zero score was read by hand; in all of them
+  the main point is right. Typical partials leave out a secondary fact (the 2025 investment growth figure,
+  the "GENIUS Act" reporting source) or summarise a detail differently (the SLOOS CRE demand). In three
+  answers a detail was wrong: the gap between the SCF Bulletin ($192,900) and the public Excel tables
+  ($192,700) was put down to rounding (the Word guide says it is public versus internal data), a web source
+  gave May 16 instead of May 15 for Powell's appointment as chair pro tempore, and a live-data answer called
+  an oil price move from $68.55 to $102.48 a 36.2% gain (it is 49.5%), which the verifier missed. The one
+  score of 0 (`oc02` in run B) is a judge error: the answer said that no December 2026 Beige Book exists and
+  then summarised the September Dallas report, labelled as such; every detail matches the source.
+- **What the evaluation changed.** The first run on the new collection exposed a run that failed when an
+  LLM's JSON output was invalid (now the planner and verifier fall back), planner routing gaps (PDF-only
+  numbers went to the data agent; a Jackson Hole question went to the web), and a data agent that took the
+  first projection quarter (PQ1) of the stress-test paths as the starting value. The fix for the last one
+  was a data dictionary shown with each table's schema. Two reference answers were relaxed to mark context
+  the question did not ask for as optional (`wb02`, `cf01`).
 - Earlier runs showed that the LLM judge "corrects" 2026 facts with its outdated training knowledge (for
-  example insisting Powell is chair). The judge prompt now says its knowledge is outdated, and judging
-  runs in thinking mode.
+  example insisting Powell is chair). The judge prompt says its knowledge is outdated, and judging runs in
+  thinking mode. Re-judging the same answers changed one of 52 scores.
 
 The development history, including the regressions found and fixed, is in the git log.
 
 ```bash
 .venv/bin/python eval/run_eval.py -c 4              # all questions
 .venv/bin/python eval/run_eval.py --ids fd01 mx02   # a subset
-.venv/bin/python -m pytest -q                       # offline unit tests (parser, chunker, BM25, tools)
+.venv/bin/python eval/run_eval.py --naive -c 4      # naive RAG baseline
+.venv/bin/python -m pytest -q                       # offline unit tests (parsers, table engine, SQL, tools)
 ```
 
 ## Configuration (`.env` or environment)
