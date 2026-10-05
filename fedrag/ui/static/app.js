@@ -136,6 +136,25 @@ const TOOLS = {
   get_exchange_rate_history: { icon: "fx", color: "--c-market" },
   calculator: { icon: "calc", color: "--c-orch" },
 };
+// What actually executes behind each tool (shown by the Details switch)
+const SEARCH_STACK = () => `BM25 + ${models().embedder} → ${models().reranker}`;
+const TOOL_BACKEND = {
+  search_fed_documents: SEARCH_STACK, find_documents: SEARCH_STACK, search_tables: SEARCH_STACK,
+  list_fed_documents: () => "collection catalog", get_document_outline: () => "collection catalog",
+  read_document_pages: () => "parsed page store", expand_context: () => "parsed page store",
+  list_tables: () => "table catalog", describe_table: () => "DuckDB", query_data: () => "DuckDB (read-only SQL)",
+  web_search: () => "DuckDuckGo search", fetch_webpage: () => "HTTP fetch + trafilatura",
+  get_economic_series: () => "FRED API", search_economic_series: () => "FRED series catalog",
+  get_exchange_rate: () => "ECB rates (Frankfurter)", get_exchange_rate_history: () => "ECB rates (Frankfurter)",
+  get_market_prices: () => "Yahoo Finance daily bars", calculator: () => "Python arithmetic",
+};
+function models() {
+  const d = (state.health && typeof state.health.detail === "object" && state.health.detail) || {};
+  const short = (m, dflt) => String(m || dflt).split("/").pop();
+  return { llm: (state.health && state.health.model) || (state.info && state.info.model) || "LLM",
+    embedder: short(d.embedder, "Qwen3-Embedding-8B"), reranker: short(d.reranker, "Qwen3-Reranker-4B") };
+}
+const toolBackend = (t) => (TOOL_BACKEND[t] || (() => "tool"))();
 const INTENTS = { fed_documents: "Fed documents", live_data: "Live data", web: "Web", general_knowledge: "General knowledge", mixed: "Mixed sources", conversational: "Conversational" };
 const CATEGORIES = {
   fed_docs: "Fed documents", fed_docs_compare: "Comparisons across documents", fed_data: "Structured data (SQL)",
@@ -571,6 +590,7 @@ const state = {
   run: null, live: null, replay: null, speed: 4,
   selected: null, evView: null, follow: true, demoSel: null,
   openDetails: new Set(),
+  details: (() => { try { return localStorage.getItem("fedrag-details") === "1"; } catch (e) { return false; } })(),
 };
 function runNow(run) {
   if (!run) return 0;
@@ -704,7 +724,37 @@ function nodeHTML(run, n) {
     `<span class="n-name">${esc(nodeTitle(n))}</span>${n.taskId ? `<span class="n-tid">${esc(n.taskId)}</span>` : ""}` +
     `<span class="n-state ${st.cls}"${st.title ? ` title="${esc(st.title)}"` : ""}>${st.html}</span></div>` +
     `<div class="n-body${n.status === "running" && n.text ? " live" : ""}" style="-webkit-line-clamp:${lines}">${nodeBody(run, n)}</div>` +
-    (foot || time ? `<div class="n-foot">${foot}<span class="grow"></span>${time}</div>` : "");
+    (foot || time ? `<div class="n-foot">${foot}<span class="grow"></span>${time}</div>` : "") +
+    (state.details ? nodeDetails(run, n) : "");
+}
+function nodeDetails(run, n) {
+  const llm = models().llm;
+  const row = (live, ico, what, how) => `<div class="nd-row${live ? " live" : ""}" title="${esc(what + " · " + how)}">` +
+    `${live ? '<span class="nd-dot"></span>' : `<span class="nd-ico">${icon(ico, 11)}</span>`}` +
+    `<span class="nd-text"><span class="nd-what">${esc(what)}</span><span class="nd-how">${esc(how)}</span></span></div>`;
+  const rows = [];
+  const running = n.status === "running";
+  const llmRole = { planner: "plans the tasks (JSON)", writer: "writes the answer (streamed)", verifier: "checks claims (JSON)", direct: "answers directly (streamed)" }[n.type];
+  if (n.type === "question") return "";
+  if (n.type === "answer") rows.push(row(false, "layers", "assembled", "citations linked to sources"));
+  else if (n.type !== "agent") rows.push(row(running, "spark", llm, llmRole));
+  else if (n.status === "idle") {
+    const tools = state.info ? (state.info.agents.find((a) => a.name === n.agent) || {}).tools || [] : [];
+    rows.push(row(false, "spark", llm, "ReAct loop: picks tools, then submits findings"));
+    [...new Set(tools.map(toolBackend))].slice(0, 3).forEach((b) => rows.push(row(false, "cog", "runs on", b)));
+  } else if (running) {
+    const inflight = n.calls.filter((c) => c.t1 == null);
+    if (inflight.length) inflight.slice(0, 3).forEach((c) => rows.push(row(true, "cog", c.tool, toolBackend(c.tool))));
+    else rows.push(row(true, "spark", llm, n.calls.length ? (run.opts && run.opts.thinking ? "reasoning over the results" : "reading results, choosing the next step") : "choosing the first tools"));
+  } else if (n.status === "pending") {
+    rows.push(row(false, "spark", llm, "waits for its turn"));
+  } else {
+    const steps = n.finish ? n.finish.steps : null;
+    rows.push(row(false, "spark", llm, steps ? `${plural(steps, "LLM step")}` : "LLM steps"));
+    const used = [...new Set(n.calls.map((c) => toolBackend(c.tool)))];
+    if (used.length) rows.push(row(false, "cog", "used", used.join(" · ")));
+  }
+  return `<div class="n-details">${rows.join("")}</div>`;
 }
 
 // ================================================================ graph
@@ -752,7 +802,7 @@ function renderGraph(run, host, selectedId) {
     const cls = `node ${n.status}${id === selectedId ? " selected" : ""}`;
     if (el.className !== cls) el.className = cls;
     el.style.setProperty("--c", `var(${agentMeta(n.agent).color})`);
-    const sig = `${n.v}|${n.status}|${run.result ? 1 : 0}|${state.info ? 1 : 0}`;
+    const sig = `${n.v}|${n.status}|${run.result ? 1 : 0}|${state.info ? 1 : 0}|${state.details ? 1 : 0}|${models().llm}`;
     if (el._sig !== sig) {
       el._sig = sig;
       el.innerHTML = nodeHTML(run, n);
@@ -1060,7 +1110,7 @@ function callHTML(run, n, c, i) {
   const time = c.t1 != null ? fmtSec(c.t1 - c.t0) : spinner(12);
   const key = `${n.id}#${i}`;
   return `<div class="call"><div class="call-head"><span class="t-dot" style="--tc:var(${tm.color})">${icon(tm.icon, 13)}</span>` +
-    `<span class="call-name">${esc(c.tool)}</span><span class="call-time">${time}</span></div>` +
+    `<span class="call-name">${esc(c.tool)}</span>${state.details ? `<span class="call-backend">${esc(toolBackend(c.tool))}</span>` : ""}<span class="call-time">${time}</span></div>` +
     `<div class="call-args">${argsHTML(c)}</div>${c.t1 != null ? resultHTML(run, n, c, key) : ""}</div>`;
 }
 function agentInspector(run, n) {
@@ -1228,7 +1278,7 @@ function renderInspector() {
     const n = run.nodes.get(state.selected) || run.nodes.get("planner") || run.nodes.get("question");
     const m = agentMeta(n.agent);
     key = `${run.id}|${n.id}`;
-    sig = `${key}|${n.v}|${n.status}|${Object.keys(run.evidence).length}|${run.result ? 1 : 0}|${state.follow}|${run.status}`;
+    sig = `${key}|${n.v}|${n.status}|${Object.keys(run.evidence).length}|${run.result ? 1 : 0}|${state.follow}|${run.status}|${state.details}`;
     const status = { pending: "waiting", running: "running", done: "done", error: "failed", stopped: "stopped" }[n.status] || n.status;
     const dur = n.t0 != null && !["question", "answer"].includes(n.type) ? ` · ${fmtSec((n.t1 ?? runNow(run)) - n.t0)} · started +${fmtSec(n.t0)}` : "";
     const followBtn = run.status === "running" ? (state.follow ? '<span class="follow"><span class="live-dot"></span>following live</span>' : `<button class="follow" data-act="follow">${icon("play", 10)}follow live</button>`) : "";
@@ -1728,6 +1778,12 @@ $("#view").addEventListener("click", (e) => {
 });
 $("#statusPill").addEventListener("click", (e) => { e.stopPropagation(); $("#popover") ? closePopover() : statusPopover(); });
 $("#themeBtn").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+$("#optDetails").addEventListener("change", (e) => {
+  state.details = e.target.checked;
+  try { localStorage.setItem("fedrag-details", state.details ? "1" : "0"); } catch (err) { /* private mode */ }
+  $("#inspBody")._sig = null;
+  render();
+});
 $("#menuBtn").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
 $(".brand").addEventListener("click", () => { if (!state.live) showWelcome(); });
 $(".brand").style.cursor = "pointer";
@@ -1742,6 +1798,7 @@ window.addEventListener("hashchange", () => {
   $("#menuBtn").innerHTML = icon("menu", 17);
   $("#brandMark").innerHTML = icon("fed", 18);
   setTheme(document.documentElement.dataset.theme || "light");
+  $("#optDetails").checked = state.details;
   renderComposer();
   try {
     state.info = await api.get("/api/info");

@@ -223,7 +223,9 @@ one source, complex ones several agents and formats), and watch the pipeline run
 Every run is saved to `data/ui_runs/`: the History tab reopens it, and Replay animates it again at 1×, 4× or
 16× speed. The Eval tab opens the 52 evaluation runs with the judge's score and the reference answer, so the
 explorer is useful while the GPU is off. Options: fact-checking on or off, thinking mode for the specialist
-agents, and follow-up questions that send the previous turns to the planner. The server reads `.env` when it
+agents, and follow-up questions that send the previous turns to the planner. The **Details** switch in the
+top bar adds to every step what is executing: the LLM and its role, or each running tool and the service
+behind it (BM25 + embedder + reranker for search, DuckDB for SQL, FRED, ECB, Yahoo, DuckDuckGo). The server reads `.env` when it
 checks the GPU, so it picks up the new tunnel address after `scripts/colab_up.py` restarts the backend.
 
 Real trace (abridged, question `cf01` in `eval/results/final_agentic.jsonl`): a cross-format question. The
