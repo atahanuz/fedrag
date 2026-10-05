@@ -108,7 +108,9 @@ class Orchestrator:
             if not plan.needs_tools:
                 trace.emit("direct", "agent_start", task="answer from general knowledge")
                 answer = await direct_answer(self.llm, question, today_s, history_note,
-                                             on_delta=(lambda d: trace.stream("direct", d)) if listeners else None)
+                                             on_delta=(lambda d: trace.stream("direct", d)) if listeners else None,
+                                             n_docs=len(self.index.docs), n_tables=sum(
+                                                 1 for t in self.index.tables.catalog.values() if t["kind"] == "table"))
                 trace.emit("direct", "final", answer=answer)
                 return self._result(question, answer, ctx, plan, [], [], usage, t0)
 

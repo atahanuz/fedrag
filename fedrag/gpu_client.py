@@ -52,6 +52,12 @@ class GPUClient:
         vecs = [d["embedding"] for d in sorted(data["data"], key=lambda d: d["index"])]
         return np.asarray(vecs, dtype=np.float32)
 
+    async def embed_documents(self, texts: list[str]) -> np.ndarray:
+        """Corpus-side embeddings (no query instruction), identical to the batch job in gpu_server/embed_corpus.py."""
+        data = await self._post("/v1/embeddings", {"input": texts, "input_type": "document"})
+        vecs = [d["embedding"] for d in sorted(data["data"], key=lambda d: d["index"])]
+        return np.asarray(vecs, dtype=np.float32)
+
     async def rerank(self, query: str, documents: list[str], instruction: str | None = None) -> list[float]:
         data = await self._post("/v1/rerank", {"query": query, "documents": documents, "instruction": instruction})
         scores = [0.0] * len(documents)

@@ -89,8 +89,10 @@ def routing_ok(q: dict, used: list[str]) -> bool:
 async def run_one(orch: Orchestrator, q: dict, sem: asyncio.Semaphore, today: dt.date) -> dict:
     async with sem:
         t0 = time.time()
+        events: list = []  # kept even when the run fails, to see where it stopped
         try:
-            res = await orch.run(q["question"], today=today)
+            res = await orch.run(q["question"], today=today,
+                                 listeners=[lambda e: events.append(e.__dict__) if e.type != "delta" else None])
             rec = {"id": q["id"], "category": q["category"], "question": q["question"],
                    "answer": res.answer, "agents_used": res.agents_used, "plan": res.plan,
                    "sources": [{k: s[k] for k in ("id", "kind", "source", "url")} for s in res.sources],
@@ -99,7 +101,7 @@ async def run_one(orch: Orchestrator, q: dict, sem: asyncio.Semaphore, today: dt
         except Exception as e:
             rec = {"id": q["id"], "category": q["category"], "question": q["question"], "answer": "",
                    "agents_used": [], "plan": {}, "sources": [], "verifications": [], "usage": {},
-                   "seconds": round(time.time() - t0, 1), "trace": [], "error": f"{type(e).__name__}: {e}"}
+                   "seconds": round(time.time() - t0, 1), "trace": events, "error": f"{type(e).__name__}: {e}"}
         print(f"  {q['id']:<5} {rec['seconds']:>6.1f}s agents={','.join(a for a in rec['agents_used'] if a in TOOL_AGENTS) or '-'}"
               + (f" ERROR {rec['error']}" if rec["error"] else ""), flush=True)
         return rec

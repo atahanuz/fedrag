@@ -255,7 +255,7 @@ class LLM:
         """Constrained JSON output; falls back to tolerant parsing if the server ignores the schema."""
         r = await self.chat(messages, agent=agent, json_schema=schema, schema_name=schema_name, **kw)
         try:
-            return _repair_json(r.content)
+            return _repair_json(r.content or r.reasoning or "")
         except (json.JSONDecodeError, ValueError):
             fix = messages + [
                 {"role": "assistant", "content": r.content},

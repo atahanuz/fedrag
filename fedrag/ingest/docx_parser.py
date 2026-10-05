@@ -16,8 +16,8 @@ from .pdf_parser import normalize_text
 from .tables import TableBlock, extract_tables, fmt_cell
 
 MAX_SQL_TABLES = 50  # questionnaires hold thousands of small answer-code tables: text only
-_CODE = re.compile(r"(\.Response\b|\.Ask\(|\bIOM\.|^\s*(Dim|If|Else|ElseIf|End If|Goto|Select Case|End Select|Case)\b|"
-                   r"=\s*\{|\bThen\s*$|\(\")", re.M)
+_CODE = re.compile(r"(\.Response\b|\.Ask\(|\.Show\(|\bIOM\.|^\s*(Dim|If|Else|ElseIf|End If|Goto|Select Case|"
+                   r"End Select|Case)\b|=\s*\{|\bThen\s*$|\(\"|^\s*\w+\.\w+\(\)\s*$)", re.M)
 
 
 def _clean(s: str) -> str:

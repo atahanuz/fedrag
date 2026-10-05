@@ -76,6 +76,7 @@ class TableStore:
                 "enable_external_access": False, "lock_configuration": True, "threads": 4,
                 "memory_limit": "2GB"})
         self._names = sorted(self.catalog, key=len, reverse=True)
+        self._lock = threading.Lock()  # cursors are created one at a time; each then runs on its own
 
     @property
     def available(self) -> bool:
@@ -104,7 +105,8 @@ class TableStore:
             res.error = "only read-only queries are allowed (SELECT / WITH / DESCRIBE / SUMMARIZE / PIVOT)"
             return res
         res.tables = self.tables_in(sql)
-        cur = self.con.cursor()
+        with self._lock:
+            cur = self.con.cursor()
         timer = threading.Timer(timeout, cur.interrupt)
         timer.start()
         try:
@@ -136,6 +138,8 @@ class TableStore:
             lines.append("Long layout: one row per cell. Filter row_group/row_label and the header levels "
                          "h1, h2, ... (top to bottom); `value` is the number (NULL when the cell is text such as a "
                          "range; the original text is in `value_text`).")
+        if t.get("about"):
+            lines.append("About the data: " + t["about"])
         if t.get("notes"):
             lines.append("Notes: " + " | ".join(t["notes"])[:1200])
         lines.append("Columns:")

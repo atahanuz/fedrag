@@ -61,8 +61,10 @@ async def revise(llm: LLM, question: str, today: str, draft: str, issues: list[s
     return r.content
 
 
-async def direct_answer(llm: LLM, question: str, today: str, history_note: str = "", on_delta=None) -> str:
-    r = await llm.chat([{"role": "system", "content": prompts.DIRECT.format(today=today)},
+async def direct_answer(llm: LLM, question: str, today: str, history_note: str = "", on_delta=None,
+                        n_docs: int = 391, n_tables: int = 846) -> str:
+    system = prompts.DIRECT.format(today=today, n_docs=n_docs, n_tables=n_tables)
+    r = await llm.chat([{"role": "system", "content": system},
                         {"role": "user", "content": f"{history_note}{question}"}],
                        agent="direct", temperature=0.4, max_tokens=1500, on_delta=on_delta)
     return r.content
@@ -87,10 +89,14 @@ async def verify(llm: LLM, question: str, today: str, draft: str, store: Evidenc
             f"## Cited evidence\n{store.render([i for i in ids if store.get(i)], 3000) or '(none cited)'}\n\n"
             + (f"Note: the draft cites IDs that do not exist: {unknown}\n\n" if unknown else "")
             + "Return your verdict as JSON.")
-    data = await llm.chat_json([{"role": "system", "content": prompts.VERIFIER.format(today=today)},
-                                {"role": "user", "content": user}],
-                               VERDICT_SCHEMA, agent="verifier", schema_name="verdict", temperature=0.1,
-                               max_tokens=1500)
+    try:
+        data = await llm.chat_json([{"role": "system", "content": prompts.VERIFIER.format(today=today)},
+                                    {"role": "user", "content": user}],
+                                   VERDICT_SCHEMA, agent="verifier", schema_name="verdict", temperature=0.1,
+                                   max_tokens=3000)
+    except Exception as e:  # a failed fact-check must not discard a finished answer
+        return {"issues": [], "verdict": "accept", "follow_up_tasks": [],
+                "error": f"verifier failed: {type(e).__name__}: {e}"[:300]}
     data.setdefault("issues", [])
     data.setdefault("follow_up_tasks", [])
     if data.get("verdict") not in ("accept", "revise", "research"):

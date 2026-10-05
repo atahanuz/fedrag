@@ -158,7 +158,8 @@ def build_tables(meta: dict, parsed) -> list[tuple[str, object, TableInfo, Table
         title = b.title or (meta["title"] if len(tables) == 1 else re.sub(r'^sheet "([^"]+)".*', r"\1", b.source))
         info = TableInfo(table=name, doc_id=meta["doc_id"], title=title, source=b.source, layout=b.layout,
                          n_rows=len(df), columns=cols, notes=b.notes[:8], row_labels=row_labels,
-                         header_values=header_values, part=parsed.table_pages[k] if k < len(parsed.table_pages) else 1)
+                         header_values=header_values, part=parsed.table_pages[k] if k < len(parsed.table_pages) else 1,
+                         about=meta.get("description", ""))
         out.append((name, df, info, b))
     return out
 
@@ -290,7 +291,8 @@ def stacked_views(results) -> list[tuple[str, str, TableInfo, str]]:
                                f"{members[0][0]['sort_date']} to {latest_meta['sort_date']})",
                          source="view: " + ", ".join(i.table for _, i in members), layout=latest.layout,
                          n_rows=sum(i.n_rows for _, i in members), columns=cols, notes=latest.notes,
-                         row_labels=latest.row_labels, header_values=header_values, part=latest.part)
+                         row_labels=latest.row_labels, header_values=header_values, part=latest.part,
+                         about=latest.about)
         views.append((name, sql, info, latest_meta["doc_id"]))
     return views
 

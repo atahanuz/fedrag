@@ -4,6 +4,8 @@
     fedrag chat                      # multi-turn session with follow-up questions
     fedrag status                    # check the GPU gateway / LLM / index
     fedrag search "query" [--type meeting_minutes]
+    fedrag tables [pattern]          # list the SQL tables (or describe one: fedrag tables NAME --describe)
+    fedrag sql "SELECT ..."          # run a read-only query over the tables
 """
 
 from __future__ import annotations
@@ -133,8 +135,31 @@ async def _status() -> None:
         console.print(f"  [red]LLM error: {e}[/red]")
     idx = CorpusIndex(gpu=g)
     console.print(f"index: {len(idx.docs)} docs, {len(idx.chunks)} chunks, dense="
-                  f"{'yes (' + str(idx.emb.shape[1]) + 'd)' if idx.emb is not None else 'no'}")
+                  f"{'yes (' + str(idx.emb.shape[1]) + 'd)' if idx.emb is not None else 'no'}, "
+                  f"{len(idx.tables.catalog)} SQL tables and views")
     await g.aclose()
+
+
+def _tables(pattern: str | None, describe: bool) -> None:
+    from .retrieval.tables import TableStore
+
+    store = TableStore()
+    if describe and pattern:
+        console.print(store.describe(pattern))
+        return
+    rows = [t for t in store.catalog.values()
+            if not pattern or pattern.lower() in (t["table"] + " " + t["title"]).lower()]
+    for t in rows:
+        console.print(f"[cyan]{t['table']}[/cyan] [dim]({t['kind']}, {t['n_rows']} rows, {t['layout']})[/dim] "
+                      f"{t['title'][:110]}")
+    console.print(f"[dim]{len(rows)} of {len(store.catalog)} tables[/dim]")
+
+
+def _sql(query: str) -> None:
+    from .retrieval.tables import TableStore
+
+    res = TableStore().query(query, max_rows=200)
+    console.print(res.render() if not res.error else f"[red]ERROR: {res.error}[/red]")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -153,6 +178,11 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("query")
     s.add_argument("-k", type=int, default=8)
     s.add_argument("--type", action="append")
+    t = sub.add_parser("tables", help="list the SQL tables extracted from the collection")
+    t.add_argument("pattern", nargs="?")
+    t.add_argument("--describe", action="store_true", help="show the schema of the table named by pattern")
+    q = sub.add_parser("sql", help="run a read-only SQL query over the tables")
+    q.add_argument("query")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
@@ -162,6 +192,10 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_chat(args.verbose))
     elif args.cmd == "status":
         asyncio.run(_status())
+    elif args.cmd == "tables":
+        _tables(args.pattern, args.describe)
+    elif args.cmd == "sql":
+        _sql(args.query)
     elif args.cmd == "search":
         from .retrieval import index as idx_mod
 

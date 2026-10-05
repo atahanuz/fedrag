@@ -112,15 +112,22 @@ DESCRIPTIONS = {
         "risk-weighted assets, loan losses by loan type (first-lien mortgages, junior liens and HELOCs, commercial "
         "and industrial, commercial real estate, credit cards, other consumer, other loans) with loss rates in "
         "percent (*_rate), pre-provision net revenue, net interest income, noninterest income and expense, "
-        "provisions, securities losses, trading and counterparty losses, pre-tax net income, AOCI."),
+        "provisions, securities losses, trading and counterparty losses, pre-tax net income, AOCI. Rows whose "
+        "disclosure_legal_name reads 'N participating banks' (or '... bank holding companies', '... firms') are "
+        "the official aggregate for all banks in that exercise: use them for aggregate starting, ending and "
+        "minimum ratios rather than averaging the banks."),
     "fed_stress_test_paths_2026": (
         "Aggregate of all banks in the 2026 stress test, severely adverse scenario: one row per item (capital, "
         "risk-weighted assets, capital ratios in percent, losses, revenues, net income, loan losses; dollars in "
-        "billions), columns pq1 ... pq9 = projection quarters 1 to 9 (2026:Q1 to 2028:Q1)."),
+        "billions), columns pq1 ... pq9 = projection quarters 1 to 9 (2026:Q1 to 2028:Q1). pq1 is already a stressed "
+        "projection quarter, not the starting point: the actual starting ratios are in the aggregate rows of the "
+        "DFAST results file (common_equity_tier1_actual_rat) and in the results report."),
     "fed_stress_test_paths_2025": (
         "Aggregate of all banks in the 2025 stress test, severely adverse scenario: one row per item (capital, "
         "risk-weighted assets, capital ratios in percent, losses, revenues, net income, loan losses; dollars in "
-        "billions), columns pq1 ... pq9 = projection quarters 1 to 9 (2025:Q1 to 2027:Q1)."),
+        "billions), columns pq1 ... pq9 = projection quarters 1 to 9 (2025:Q1 to 2027:Q1). pq1 is already a stressed "
+        "projection quarter, not the starting point: the actual starting ratios are in the aggregate rows of the "
+        "DFAST results file (common_equity_tier1_actual_rat) and in the results report."),
     "fed_stress_test_market_shocks_2026": (
         "Instantaneous shocks to trading and fair-value positions in the 2026 global market shock (severely "
         "adverse, simplified shocks): one sheet per asset class (equities by geography, dividends, FX spot and "

@@ -27,6 +27,10 @@ LABELS = {"planner": "Planner", "fed_research": "Fed document research", "data_a
 
 EXAMPLES = [
     "What did the FOMC decide at its July 2026 meeting, and who dissented?",
+    "Which banks had a projected minimum CET1 ratio below 10 percent in the 2026 stress test?",
+    "How did the median 2026 fed funds projection change across the SEPs since September 2025?",
+    "What was total household debt in 2026:Q2 according to the New York Fed, and how much is credit card debt?",
+    "What task forces did Chairman Warsh describe in his July 2026 testimony?",
     "How did the Beige Book's description of labor markets change between January and September 2026?",
     "Which banks had the lowest projected CET1 ratios in the 2026 stress test?",
     "Did the Fed raise rates in September 2026? How does today's fed funds range compare with July?",
@@ -50,7 +54,7 @@ def link_citations(answer: str, sources: list[dict]) -> str:
 def sources_markdown(res: RunResult) -> str:
     if not res.sources:
         return "_No sources: answered from general knowledge._"
-    kinds = {"doc": "Federal Reserve documents", "web": "Web", "data": "Market & economic data"}
+    kinds = {"doc": "Federal Reserve documents and data tables", "web": "Web", "data": "Market & economic data"}
     out = []
     for kind, label in kinds.items():
         items = [s for s in res.sources if s["kind"] == kind]

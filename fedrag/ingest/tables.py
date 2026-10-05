@@ -602,6 +602,7 @@ class TableInfo:
     row_labels: list[str] = field(default_factory=list)
     header_values: dict[str, list[str]] = field(default_factory=dict)
     part: int = 1  # virtual page of the document that shows this table
+    about: str = ""  # data dictionary of the source file (metadata.csv description)
 
     def periodic_labels(self) -> bool:
         return len(self.row_labels) >= 6 and sum(period_of(x) is not None for x in self.row_labels) >= 0.8 * len(

@@ -80,6 +80,11 @@ class CorpusIndex:
             if meta["ids"] == [c["chunk_id"] for c in self.chunks]:
                 self.emb = np.load(emb_path).astype(np.float32)
                 self.emb_model = meta.get("model")
+                if meta.get("hashes"):
+                    stale = sum(h != _text_hash(embedding_text(c)) for h, c in zip(meta["hashes"], self.chunks))
+                    if stale:
+                        log.warning("%d chunks changed since they were embedded; run "
+                                    "`python -m fedrag.retrieval.index embed-missing`", stale)
             else:
                 log.warning("embeddings do not match chunks.jsonl; dense retrieval disabled (re-run embedding)")
         self._qcache: OrderedDict[str, np.ndarray] = OrderedDict()
@@ -349,6 +354,24 @@ def _merge(new_dir: Path | None = None) -> None:
     print(f"merged {len(rows)} embeddings ({emb.shape[1]}-d) -> {config.INDEX_DIR}")
 
 
+async def _embed_remote(batch: int = 16) -> None:
+    """Embed the chunks listed in embed_input.jsonl through the running GPU gateway (small updates: no batch job)."""
+    rows = _read_jsonl(config.INDEX_DIR / "embed_input.jsonl")
+    if rows:
+        gpu = GPUClient(timeout=300)
+        vecs = []
+        for k in range(0, len(rows), batch):
+            vecs.append(await gpu.embed_documents([r["text"] for r in rows[k: k + batch]]))
+            print(f"  embedded {min(k + batch, len(rows))}/{len(rows)}", flush=True)
+        await gpu.aclose()
+        new = config.INDEX_DIR / "new"
+        new.mkdir(parents=True, exist_ok=True)
+        np.save(new / "embeddings.npy", np.concatenate(vecs).astype(np.float16))
+        meta = json.load(open(config.INDEX_DIR / "ids.json"))
+        json.dump({"model": meta.get("model"), "ids": [r["id"] for r in rows]}, open(new / "ids.json", "w"))
+    _merge(config.INDEX_DIR / "new")
+
+
 async def _search_cli(args) -> None:
     idx = CorpusIndex(gpu=GPUClient() if config.GPU_URL else None)
     hits = await idx.search(args.query, k=args.k, doc_types=args.type, date_from=args.date_from,
@@ -365,6 +388,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("prepare")
+    sub.add_parser("embed-missing", help="prepare, embed the missing chunks via the GPU gateway, merge")
     mg = sub.add_parser("merge")
     mg.add_argument("--new", type=Path, help="directory with the new embeddings.npy and ids.json")
     s = sub.add_parser("search")
@@ -379,6 +403,9 @@ def main() -> None:
         _prepare()
     elif args.cmd == "merge":
         _merge(args.new)
+    elif args.cmd == "embed-missing":
+        _prepare()
+        asyncio.run(_embed_remote())
     else:
         asyncio.run(_search_cli(args))
 

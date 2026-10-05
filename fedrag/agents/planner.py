@@ -63,6 +63,12 @@ Q: What is the euro worth in dollars today and how does the fed funds rate compa
 -> intent mixed; tasks: [market_data: "Latest EUR/USD rate and the current fed funds target range
    (DFEDTARL/DFEDTARU)", web_research: "Current ECB key interest rates (deposit facility rate) and the date
    of the last change"]
+Q: What did Chairman Warsh say about forward guidance at Jackson Hole in August 2026?
+-> intent fed_documents; tasks: [fed_research: "Chairman Warsh's speech at the August 28, 2026 Jackson Hole symposium
+   (doc_type speech): his views on forward guidance."] (2026 speeches are in the collection: no web search)
+Q: What happens to house prices in the 2026 stress test's severely adverse scenario?
+-> intent fed_documents; tasks: [fed_research: "2026 Supervisory Stress Test Scenarios document: the severely adverse
+   scenario's path for house prices and commercial real estate prices (published peak-to-trough declines)."]
 Q: What is quantitative tightening?   -> intent general_knowledge; needs_tools false; tasks []
 Q: thanks!                            -> intent conversational; needs_tools false; tasks []"""
 
@@ -105,10 +111,18 @@ async def make_plan(llm: LLM, question: str, today: str, corpus_card: str, histo
     system = prompts.PLANNER.format(today=today, corpus_card=corpus_card, dataset_card=dataset_card, n_docs=n_docs,
                                     n_tables=n_tables) + "\n\n" + EXAMPLES
     user = f"{_history_block(history)}New user question: {question}\n\nReturn the plan as JSON."
-    data = await llm.chat_json(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        PLAN_SCHEMA, agent="planner", schema_name="plan", temperature=0.2, max_tokens=1500,
-    )
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    try:
+        data = await llm.chat_json(messages, PLAN_SCHEMA, agent="planner", schema_name="plan", temperature=0.2,
+                                   max_tokens=2500)
+    except Exception:
+        try:  # once more, deterministic and with room for a long plan
+            data = await llm.chat_json(messages, PLAN_SCHEMA, agent="planner", schema_name="plan", temperature=0.0,
+                                       max_tokens=4000)
+        except Exception as e:  # last resort: research the question in the collection (the web fallback follows)
+            data = {"standalone_question": question, "reasoning": f"planner failed ({type(e).__name__}); default plan",
+                    "intent": "fed_documents", "needs_tools": True,
+                    "tasks": [{"id": "t1", "agent": "fed_research", "instruction": question, "depends_on": []}]}
     tasks = []
     for i, t in enumerate(data.get("tasks") or []):
         if t.get("agent") not in AGENTS or not t.get("instruction"):
