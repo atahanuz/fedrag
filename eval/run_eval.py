@@ -10,6 +10,8 @@ For every question it records the answer, the agents used and the full trace, th
     python eval/run_eval.py                       # all questions, 3 at a time
     python eval/run_eval.py --ids fd01 mx02 -c 1  # a subset
     python eval/run_eval.py --rescore eval/results/run_X.jsonl   # re-judge saved answers
+    python eval/run_eval.py --no-judge --tag gemma   # answers only (judge later with --rescore, e.g. after
+                                                     # switching the served LLM back to the judge model)
 """
 
 from __future__ import annotations
@@ -179,6 +181,7 @@ async def main() -> None:
     ap.add_argument("--rescore", help="re-judge answers from a saved results file")
     ap.add_argument("--naive", action="store_true", help="naive RAG baseline: one retrieval + one LLM call")
     ap.add_argument("--tag", default="")
+    ap.add_argument("--no-judge", action="store_true", help="save the answers without grading them")
     args = ap.parse_args()
 
     questions = [json.loads(line) for line in open(HERE / "questions.jsonl")]
@@ -212,7 +215,12 @@ async def main() -> None:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     if not args.rescore:
+        for r in records:
+            r["model"] = llm.model  # the LLM that answered
         save()
+    if args.no_judge:
+        print(f"answers saved (not judged): {out}")
+        return
 
     async def safe_judge(r: dict) -> dict:
         try:
@@ -225,9 +233,12 @@ async def main() -> None:
         q = qmap[r["id"]]
         r["score"] = g.get("score", 0) if not r.get("error") else 0
         r["judge"] = g.get("explanation", "")
+        r["judge_model"] = llm.model
         r["routing_ok"] = None if r["agents_used"] == ["naive"] else routing_ok(q, r["agents_used"])
     save()
     summary = summarize(records)
+    summary["model"] = records[0].get("model", "") if records else ""
+    summary["judge_model"] = llm.model
     json.dump(summary, open(out.with_suffix(".summary.json"), "w"), indent=2)
     print_table(summary)
     print("\nper question:")

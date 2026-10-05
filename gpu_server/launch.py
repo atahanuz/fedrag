@@ -30,11 +30,26 @@ LOGS = Path("/content/logs")
 ENDPOINT_FILE = Path("/content/fedrag_endpoint.json")
 KEY_FILE = Path("/content/fedrag_api_key")
 
-LLM_MODEL = os.environ.get("FEDRAG_LLM_MODEL", "Qwen/Qwen3.8-27B-FP8")
-SERVED_NAME = os.environ.get("FEDRAG_LLM_NAME", "qwen3.8-27b")
-LLM_GPU_UTIL = os.environ.get("FEDRAG_LLM_GPU_UTIL", "0.62")
-LLM_MAX_LEN = os.environ.get("FEDRAG_LLM_MAX_LEN", "65536")
-USE_MTP = os.environ.get("FEDRAG_LLM_MTP", "1") == "1"
+# Which LLM vLLM serves. scripts/switch_llm.py writes LLM_CHOICE so that every later start, including the
+# heartbeat's --heal restarts, serves the same model; environment variables override it.
+LLM_CHOICE = Path("/content/fedrag_llm.json")
+_choice = json.loads(LLM_CHOICE.read_text()) if LLM_CHOICE.exists() else {}
+
+
+def _opt(env: str, key: str, default: str) -> str:
+    return os.environ.get(env, str(_choice.get(key, default)))
+
+
+LLM_MODEL = _opt("FEDRAG_LLM_MODEL", "model", "Qwen/Qwen3.8-27B-FP8")
+SERVED_NAME = _opt("FEDRAG_LLM_NAME", "name", "qwen3.8-27b")
+LLM_GPU_UTIL = _opt("FEDRAG_LLM_GPU_UTIL", "gpu_util", "0.62")
+LLM_MAX_LEN = _opt("FEDRAG_LLM_MAX_LEN", "max_len", "65536")
+USE_MTP = _opt("FEDRAG_LLM_MTP", "mtp", "1") == "1"  # Qwen3.8's multi-token-prediction head
+TOOL_PARSER = _opt("FEDRAG_LLM_TOOL_PARSER", "tool_parser", "qwen3_xml")
+REASONING_PARSER = _opt("FEDRAG_LLM_REASONING_PARSER", "reasoning_parser", "qwen3")
+QUANT = _opt("FEDRAG_LLM_QUANT", "quant", "")  # e.g. fp8: quantize a bf16 checkpoint while loading it
+_extra = os.environ.get("FEDRAG_LLM_EXTRA_ARGS")  # JSON list of further `vllm serve` arguments
+EXTRA_ARGS: list[str] = json.loads(_extra) if _extra else _choice.get("extra_args", [])
 CLOUDFLARED = "/usr/local/bin/cloudflared"
 GATEWAY_LOCAL = "http://127.0.0.1:8000"
 TUNNEL_PATTERN = f"cloudflared tunnel --no-autoupdate --url {GATEWAY_LOCAL}"  # only our own tunnel
@@ -100,11 +115,15 @@ def start_vllm() -> None:
         "--served-model-name", SERVED_NAME,
         "--max-model-len", LLM_MAX_LEN,
         "--gpu-memory-utilization", LLM_GPU_UTIL,
-        "--reasoning-parser", "qwen3",
-        "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml",
+        "--enable-auto-tool-choice", "--tool-call-parser", TOOL_PARSER,
         "--language-model-only",
         "--max-num-seqs", "32",
     ]
+    if REASONING_PARSER:
+        cmd += ["--reasoning-parser", REASONING_PARSER]
+    if QUANT:
+        cmd += ["--quantization", QUANT]
+    cmd += EXTRA_ARGS
     if USE_MTP:
         cmd += ["--speculative-config", json.dumps({"method": "mtp", "num_speculative_tokens": 3})]
     _spawn("vllm", cmd)
@@ -192,7 +211,18 @@ def main() -> None:
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--heal", action="store_true", help="with --status: restart dead components")
     ap.add_argument("--wait-llm", action="store_true", help="block until vLLM answers /health")
+    ap.add_argument("--restart-llm", action="store_true", help="stop vLLM and start the configured model")
     args = ap.parse_args()
+    if args.restart_llm:
+        subprocess.run(["pkill", "-f", "vllm serve"])
+        for _ in range(60):  # wait for the old engine to give its GPU memory back
+            time.sleep(2)
+            if not _running("vllm serve") and not _running("VLLM::EngineCore"):
+                break
+        time.sleep(5)
+        start_vllm()
+        print(f"starting {LLM_MODEL} as {SERVED_NAME}", flush=True)
+        return
     if args.status:
         print(json.dumps(status(heal=args.heal)))
         return

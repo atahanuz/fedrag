@@ -1,0 +1,126 @@
+{
+  "overall": {
+    "n": 52,
+    "routing_acc": 1.0,
+    "correct_rate": 1.0,
+    "mean_score": 1.0,
+    "cited_rate": 1.0,
+    "median_seconds": 68.2,
+    "mean_llm_calls": 7.9,
+    "mean_tool_calls": 5.7
+  },
+  "by_category": {
+    "fed_docs": {
+      "n": 10,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 95.9,
+      "mean_llm_calls": 7.9,
+      "mean_tool_calls": 5.3
+    },
+    "fed_docs_compare": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 108.5,
+      "mean_llm_calls": 12,
+      "mean_tool_calls": 10.5
+    },
+    "live_data": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 24.0,
+      "mean_llm_calls": 6.2,
+      "mean_tool_calls": 3
+    },
+    "web": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 67.0,
+      "mean_llm_calls": 8.5,
+      "mean_tool_calls": 6.5
+    },
+    "mixed": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 131.8,
+      "mean_llm_calls": 11,
+      "mean_tool_calls": 13
+    },
+    "general": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": null,
+      "median_seconds": 14.2,
+      "mean_llm_calls": 2,
+      "mean_tool_calls": 0
+    },
+    "out_of_collection": {
+      "n": 2,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 70.2,
+      "mean_llm_calls": 7.5,
+      "mean_tool_calls": 4
+    },
+    "fed_data": {
+      "n": 9,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 40.2,
+      "mean_llm_calls": 7,
+      "mean_tool_calls": 4.3
+    },
+    "word": {
+      "n": 2,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 65.8,
+      "mean_llm_calls": 7.5,
+      "mean_tool_calls": 4
+    },
+    "web_pages": {
+      "n": 6,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 100.3,
+      "mean_llm_calls": 7.2,
+      "mean_tool_calls": 4.7
+    },
+    "cross_format": {
+      "n": 3,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 95.5,
+      "mean_llm_calls": 12,
+      "mean_tool_calls": 10
+    }
+  },
+  "model": "",
+  "judge_model": "gemma-4-31b"
+}

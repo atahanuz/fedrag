@@ -139,7 +139,7 @@ outline, table blocks), so sectioning, chunking, retrieval and citation work the
 
 | Role | Model | Notes |
 | --- | --- | --- |
-| LLM for every agent | `Qwen/Qwen3.8-27B-FP8` via vLLM 0.30 | tool calling (`qwen3_xml` parser), JSON-schema output, MTP speculative decoding, about 95 tok/s per stream, 64K context, thinking mode off |
+| LLM for every agent | `Qwen/Qwen3.8-27B-FP8` via vLLM 0.31 | tool calling (`qwen3_xml` parser), JSON-schema output, MTP speculative decoding, about 95 tok/s per stream, 64K context, thinking mode off |
 | Embeddings | `Qwen/Qwen3-Embedding-8B` | chunks embedded on the GPU once, then only new or changed ones (4,073 new chunks: about 5 min); queries use an instruction prefix |
 | Reranker | `Qwen/Qwen3-Reranker-4B` | P("yes") relevance; about 2 s for 40 passages |
 
@@ -333,6 +333,61 @@ The development history, including the regressions found and fixed, is in the gi
 .venv/bin/python -m pytest -q                       # offline unit tests (parsers, table engine, SQL, tools)
 ```
 
+### Model comparison: Qwen3.8-27B vs Gemma 4 31B (2026-10-05)
+
+The same pipeline (prompts, tools, retrieval, sampling settings) with `google/gemma-4-31B-it` as the LLM of
+every agent, run twice on the 52 questions. Gemma ran in FP8 (quantized on load), with vLLM's native
+`gemma4` tool-call and reasoning parsers. Under JSON-schema constrained decoding it padded objects with
+whitespace until the token limit instead of closing them (the planner, the fact-checker and the forced
+"submit findings" call all hung), so it is served with `disable_any_whitespace`. Both systems were judged
+by the same judge (Qwen3.8-27B, thinking mode) against the same references; Gemma also judged all four
+runs as a cross-check.
+
+| | Qwen3.8-27B (runs A / B) | Gemma 4 31B (runs A / B) |
+| --- | --- | --- |
+| Fully correct, Qwen judge | **47 / 48** of 52 (91%) | 37 / 38 of 52 (72%) |
+| Fully correct, Gemma judge | **50 / 52** (98%) | 50 / 47 (93%) |
+| Fully correct, my reading of every disputed answer | **47 / 48** | about 42 / 42 (81%) |
+| Mean score (Qwen judge) | 0.95 | 0.86 |
+| Routing | 52/52 | 50/52 (both runs) |
+| Tool-based answers with citations | 100% | 100% |
+| Median time per question (4 at a time) | 67 s | **45 s** |
+| Tool calls / LLM calls per question | 5.6 / 7.9 | 3.4 / 7.5 |
+| Prompt / generated tokens per question | 49k / 2.6k | **35k / 1.1k** |
+
+- **Both judges rank Qwen higher**, Gemma included, so the gap is not Qwen favoring itself. The Gemma
+  judge is more lenient on omissions for both systems.
+- **Where Gemma loses**: it researches less (3.4 tool calls against 5.6) and writes shorter answers, so it
+  drops secondary facts the reference asks for: "interagency" in SR 26-2, the bank counts in the stress-test
+  comparison, "up from 3.6 percent in June" for the SEP, the FSR context of the oil question. Comparisons
+  across documents (0.75 against 1.00), mixed-source questions (0.62 against 0.94) and cross-format
+  questions (0.58 against 0.83) suffer most.
+- **Errors**: one Gemma run reported the stress-test decline to the end of the horizon instead of the
+  minimum (0.6 and 0.1 points instead of 1.8 and 1.6, the mistake the data dictionary was written to
+  prevent for Qwen), one counted five April dissents while naming four, and both runs answered the oil
+  question from market data alone without the FSR. It also sent the QE/QT definition to the document agent
+  instead of answering directly. Qwen's errors in its two runs are listed above.
+- **About 9 of Gemma's 29 partial scores are judge strictness** (it gave both rate ranges without writing
+  "25 basis points higher"; it stated both survey values without the difference), hence the 81% estimate.
+  The live-data questions ran about 18 hours after the Qwen runs, so the S&P 500 answer used a newer close
+  than the reference; I counted those as correct.
+- **Caveats**: the prompts, the planner examples and the data dictionaries were tuned on Qwen during
+  development, and the sampling settings (temperature 0.3, top-k 20) are Qwen's, not Gemma's recommended
+  ones (temperature 1.0, top-k 64). The comparison measures each model in this system as built, not the
+  models in general.
+
+Result files: `eval/results/final_gemma_{a,b}.jsonl` (judged by Qwen), `final_judge_gemma_*.jsonl` (all four
+runs judged by Gemma), `final_model_comparison.summary.json`. To repeat it:
+
+```bash
+.venv/bin/python scripts/switch_llm.py gemma          # serve Gemma on the running VM (about 3-7 min)
+.venv/bin/python eval/run_eval.py -c 4 --no-judge --tag gemmaA
+.venv/bin/python scripts/switch_llm.py qwen           # back to the judge model
+.venv/bin/python eval/run_eval.py --rescore eval/results/run_<stamp>_gemmaA.jsonl --tag gemmaA_judged
+.venv/bin/python eval/compare.py qwen=eval/results/final_agentic.jsonl,eval/results/final_agentic_b.jsonl \
+    gemma=eval/results/run_<stamp>_gemmaA_judged.jsonl
+```
+
 ## Configuration (`.env` or environment)
 
 | Variable | Default | Purpose |
@@ -361,8 +416,9 @@ fedrag/
 gpu_server/      models.py, embed_corpus.py, gateway.py (FastAPI: auth, embeddings, rerank, LLM proxy),
                  launch.py (vLLM + gateway + tunnel + keeper), keeper.py, setup_vm.py
 scripts/         fetch_corpus.py (discover + download the collection), colab_up.py (Colab bring-up),
+                 switch_llm.py (serve another LLM on the running VM),
                  colab_keepalive.py (heartbeat + token refresh)
-eval/            questions.jsonl, run_eval.py
+eval/            questions.jsonl, run_eval.py, compare.py (runs side by side)
 tests/           offline unit tests
 docs/            explorer.png (the screenshot above)
 federal_reserve/ the source files (not in git; metadata.csv lists their URLs and hashes)
