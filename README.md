@@ -17,7 +17,9 @@ queries. The system also handles questions that are only partly about the collec
 | Several of the above | the planner runs several agents in parallel and the writer merges their findings |
 | General knowledge or chit-chat | answered directly by the LLM, no tools |
 
-All models are open-weight and self-hosted on a Colab A100 80GB. No proprietary API keys are needed.
+All models are open-weight and self-hosted on a Colab A100 80GB. No proprietary API keys are needed. A web
+GUI, the [pipeline explorer](#pipeline-explorer-web-gui), shows each run live: which agents the planner
+summons, every tool call and SQL query, the passages they cite and the fact-check.
 
 ## How it works
 
@@ -197,11 +199,32 @@ heartbeat and token refresh (without the keeper).
 .venv/bin/python -m fedrag search "CET1 ratio" --type stress_test   # raw retrieval, no agents
 .venv/bin/python -m fedrag tables household_debt          # list SQL tables (add --describe NAME for a schema)
 .venv/bin/python -m fedrag sql "SELECT period, total FROM nyfed_household_debt_2026q2__page_3_data ORDER BY period DESC LIMIT 4"
-.venv/bin/python -m fedrag.ui.app                         # web UI on http://127.0.0.1:7860
+.venv/bin/python -m fedrag ui                             # pipeline explorer on http://127.0.0.1:7860
 ```
 
-The web UI streams every agent as a collapsible panel listing its tool calls and findings, and links each
-citation to its source.
+### Pipeline explorer (web GUI)
+
+`fedrag ui` serves a page where you type a question, or pick one of 15 examples (simple ones need one agent and
+one source, complex ones several agents and formats), and watch the pipeline run:
+
+![Pipeline explorer during a run](docs/explorer.png)
+
+- **Pipeline graph**: the planner, each agent task it creates (parallel tasks side by side, dependent tasks
+  below their inputs), the writer, the fact-checker and the answer. Running steps glow and the edges into
+  them animate; a web fallback, a research round or a revision adds its own row.
+- **Timeline**: when each step ran, with tool calls as solid segments, so parallel work and LLM time show.
+- **Inspector**: click any step. An agent shows its task and every tool call grouped by step: search queries
+  and filters, SQL (highlighted) with its result table, pages read, web pages, data series. Each call lists
+  the passages it returned, and the agent's findings follow, with confidence and gaps. The planner shows its
+  reasoning and tasks; the fact-checker shows its verdict and issues.
+- **Answer**: streams in while the writer types. Each citation is a chip: hover to preview the passage, click
+  to read it in full (for a SQL result, the query and its rows) and see which agent retrieved it.
+
+Every run is saved to `data/ui_runs/`: the History tab reopens it, and Replay animates it again at 1×, 4× or
+16× speed. The Eval tab opens the 52 evaluation runs with the judge's score and the reference answer, so the
+explorer is useful while the GPU is off. Options: fact-checking on or off, thinking mode for the specialist
+agents, and follow-up questions that send the previous turns to the planner. The server reads `.env` when it
+checks the GPU, so it picks up the new tunnel address after `scripts/colab_up.py` restarts the backend.
 
 Real trace (abridged, question `cf01` in `eval/results/final_agentic.jsonl`): a cross-format question. The
 planner gives the Bulletin (PDF) to `fed_research` and the Excel tables to `data_analyst`; they run in
@@ -330,13 +353,16 @@ fedrag/
   tools/         fed_docs.py, data_tools.py (SQL tools), web.py, market.py, base.py (Tool, RunContext)
   agents/        base.py (ReAct ToolAgent), planner.py, specialists.py, writer.py (synth/verify), prompts.py
   orchestrator.py  the pipeline;  evidence.py  citation registry;  llm.py  OpenAI-compatible client
-  cli.py, ui/app.py
+  cli.py         fedrag ask / chat / search / tables / sql / ui
+  ui/            app.py (explorer server: runs the pipeline, streams its trace as NDJSON, saves runs),
+                 static/ (the page: pipeline graph, timeline, inspector; no build step)
 gpu_server/      models.py, embed_corpus.py, gateway.py (FastAPI: auth, embeddings, rerank, LLM proxy),
                  launch.py (vLLM + gateway + tunnel + keeper), keeper.py, setup_vm.py
 scripts/         fetch_corpus.py (discover + download the collection), colab_up.py (Colab bring-up),
                  colab_keepalive.py (heartbeat + token refresh)
 eval/            questions.jsonl, run_eval.py
 tests/           offline unit tests
+docs/            explorer.png (the screenshot above)
 federal_reserve/ the source files (not in git; metadata.csv lists their URLs and hashes)
 ```
 

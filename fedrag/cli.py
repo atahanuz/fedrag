@@ -6,6 +6,7 @@
     fedrag search "query" [--type meeting_minutes]
     fedrag tables [pattern]          # list the SQL tables (or describe one: fedrag tables NAME --describe)
     fedrag sql "SELECT ..."          # run a read-only query over the tables
+    fedrag ui                        # web GUI: watch the pipeline run (http://127.0.0.1:7860)
 """
 
 from __future__ import annotations
@@ -183,6 +184,9 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--describe", action="store_true", help="show the schema of the table named by pattern")
     q = sub.add_parser("sql", help="run a read-only SQL query over the tables")
     q.add_argument("query")
+    u = sub.add_parser("ui", help="web GUI: ask questions and watch the agents work")
+    u.add_argument("--host", default="127.0.0.1")
+    u.add_argument("--port", type=int, default=7860)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
@@ -196,6 +200,10 @@ def main(argv: list[str] | None = None) -> None:
         _tables(args.pattern, args.describe)
     elif args.cmd == "sql":
         _sql(args.query)
+    elif args.cmd == "ui":
+        from .ui.app import main as ui_main
+
+        ui_main(["--host", args.host, "--port", str(args.port)])
     elif args.cmd == "search":
         from .retrieval import index as idx_mod
 

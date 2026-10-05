@@ -14,7 +14,8 @@ from typing import Any, Callable
 class Event:
     t: float
     agent: str
-    type: str  # plan | agent_start | tool_call | tool_result | agent_finish | synthesis | verification | final | error | info
+    type: str  # plan | agent_start | thought | tool_call | tool_result | agent_finish | synthesis | verification
+    #            | final | error | info; transient (not kept): delta | tool_output
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -34,14 +35,18 @@ class Trace:
                 pass
         return ev
 
-    def stream(self, agent: str, text: str) -> None:
-        """Transient token-stream event for live displays; not kept in the trace."""
-        ev = Event(t=round(time.time() - self.t0, 2), agent=agent, type="delta", data={"text": text})
+    def transient(self, agent: str, type: str, **data: Any) -> None:
+        """An event for live displays only (streamed tokens, full tool outputs); not kept in the trace."""
+        ev = Event(t=round(time.time() - self.t0, 2), agent=agent, type=type, data=data)
         for fn in self.listeners:
             try:
                 fn(ev)
             except Exception:
                 pass
+
+    def stream(self, agent: str, text: str) -> None:
+        """Transient token-stream event for live displays; not kept in the trace."""
+        self.transient(agent, "delta", text=text)
 
     def to_list(self) -> list[dict]:
         return [asdict(e) for e in self.events]

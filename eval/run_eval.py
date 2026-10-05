@@ -92,7 +92,8 @@ async def run_one(orch: Orchestrator, q: dict, sem: asyncio.Semaphore, today: dt
         events: list = []  # kept even when the run fails, to see where it stopped
         try:
             res = await orch.run(q["question"], today=today,
-                                 listeners=[lambda e: events.append(e.__dict__) if e.type != "delta" else None])
+                                 listeners=[lambda e: events.append(e.__dict__)
+                                            if e.type not in ("delta", "tool_output") else None])
             rec = {"id": q["id"], "category": q["category"], "question": q["question"],
                    "answer": res.answer, "agents_used": res.agents_used, "plan": res.plan,
                    "sources": [{k: s[k] for k in ("id", "kind", "source", "url")} for s in res.sources],

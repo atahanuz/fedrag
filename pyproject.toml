@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ui = ["gradio>=5.0"]
+ui = ["fastapi>=0.110", "uvicorn>=0.29"]  # the pipeline explorer (fedrag ui)
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]

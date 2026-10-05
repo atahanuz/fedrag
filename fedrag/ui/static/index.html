@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FedRAG Pipeline Explorer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f5bd5'/%3E%3Cpath d='M8 23h16M10 21v-7M14 21v-7M18 21v-7M22 21v-7M7 12l9-5 9 5z' stroke='white' stroke-width='2' fill='none' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("fedrag-theme"); } catch (e) {}
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/app.css?v=__V__">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="topbar">
+    <button class="icon-btn menu-btn" id="menuBtn" title="Examples and history" aria-label="Examples and history"></button>
+    <div class="brand">
+      <div class="brand-mark" id="brandMark"></div>
+      <div>
+        <div class="brand-name">FedRAG</div>
+        <div class="brand-sub">Agentic research pipeline explorer</div>
+      </div>
+    </div>
+    <div class="corpus-pill" id="corpusPill">Loading collection…</div>
+    <div class="spacer"></div>
+    <button class="status-pill" id="statusPill" data-status="checking"><span class="dot"></span><span id="statusText">Checking GPU…</span></button>
+    <button class="icon-btn" id="themeBtn" title="Switch theme" aria-label="Switch theme"></button>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="examples" role="tab">Examples</button>
+      <button class="tab" data-tab="history" role="tab">History <span class="count" id="histCount"></span></button>
+      <button class="tab" data-tab="eval" role="tab">Eval <span class="count" id="evalCount"></span></button>
+    </div>
+    <div class="side-body scroll" id="sideBody"></div>
+  </aside>
+
+  <main class="main scroll" id="main">
+    <div class="main-inner">
+      <section class="composer" id="composer">
+        <textarea id="q" rows="1" placeholder="Ask about FOMC decisions, stress tests, Beige Books, household debt, live markets…" aria-label="Question"></textarea>
+        <div class="composer-bar">
+          <label class="toggle" title="A fact-checker reviews the draft against the cited evidence and can send it back for revision or more research"><input type="checkbox" id="optVerify" checked><span class="sw"></span>Fact-check</label>
+          <label class="toggle" title="Specialist agents reason step by step before each tool call (slower)"><input type="checkbox" id="optThinking"><span class="sw"></span>Thinking mode</label>
+          <label class="toggle" id="followWrap" hidden title="Send the previous questions and answers so the planner can resolve references like “that meeting”"><input type="checkbox" id="optFollow"><span class="sw"></span>Follow-up</label>
+          <div class="spacer"></div>
+          <span class="hint-key" title="Shift+Enter for a new line">Enter ↵ to run</span>
+          <button class="btn primary" id="runBtn"></button>
+        </div>
+      </section>
+      <div id="composerAlert"></div>
+      <div id="view"></div>
+    </div>
+  </main>
+
+  <aside class="inspector" id="inspector">
+    <div class="insp-head" id="inspHead"></div>
+    <div class="insp-body scroll" id="inspBody"></div>
+  </aside>
+</div>
+<script src="/static/app.js?v=__V__"></script>
+</body>
+</html>

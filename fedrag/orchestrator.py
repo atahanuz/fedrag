@@ -23,7 +23,7 @@ from .agents.base import AgentResult
 from .agents.planner import Plan, Task, make_plan
 from .agents.specialists import build_specialists
 from .agents.writer import direct_answer, revise, synthesize, verify
-from .evidence import EvidenceStore, cited_ids
+from .evidence import Evidence, EvidenceStore, cited_ids
 from .gpu_client import GPUClient
 from .llm import LLM, Usage, run_usage
 from .retrieval.index import CorpusIndex
@@ -80,21 +80,26 @@ class Orchestrator:
     # ------------------------------------------------------------------ main entry
     async def run(self, question: str, history: list[dict] | None = None,
                   listeners: list[Callable[[Event], None]] | None = None,
-                  today: dt.date | None = None, verify: bool | None = None) -> RunResult:
-        """``verify`` overrides the instance default for this run only."""
+                  today: dt.date | None = None, verify: bool | None = None, thinking: bool | None = None,
+                  evidence: EvidenceStore | None = None) -> RunResult:
+        """``verify`` and ``thinking`` override the instance defaults for this run only. Pass ``evidence`` to
+        look up passages while the run goes on (the web UI shows each one as a tool returns it)."""
         t0 = time.time()
         usage = Usage()
         token = run_usage.set(usage)
         try:
             return await self._run(question, history, listeners or [], today or dt.date.today(), usage, t0,
-                                   self.verify_enabled if verify is None else verify)
+                                   self.verify_enabled if verify is None else verify,
+                                   self.thinking if thinking is None else thinking,
+                                   EvidenceStore() if evidence is None else evidence)
         finally:
             run_usage.reset(token)
 
-    async def _run(self, question, history, listeners, today, usage, t0, verify_enabled) -> RunResult:
+    async def _run(self, question, history, listeners, today, usage, t0, verify_enabled, thinking,
+                   evidence) -> RunResult:
         trace = Trace()
         trace.listeners.extend(listeners)
-        ctx = RunContext(index=self.index, llm=self.llm, evidence=EvidenceStore(), trace=trace, today=today)
+        ctx = RunContext(index=self.index, llm=self.llm, evidence=evidence, trace=trace, today=today)
         today_s = today.strftime("%A, %B %d, %Y")
         try:
             trace.emit("planner", "agent_start", task="route and decompose the question")
@@ -114,7 +119,7 @@ class Orchestrator:
                 trace.emit("direct", "final", answer=answer)
                 return self._result(question, answer, ctx, plan, [], [], usage, t0)
 
-            specialists = build_specialists(self.index, today_s, thinking=self.thinking)
+            specialists = build_specialists(self.index, today_s, thinking=thinking)
             results = await self._execute(ctx, plan.tasks, specialists)
 
             # Corrective step: the collection (or every agent) found nothing -> try the open web once.
@@ -190,13 +195,19 @@ def finalize(draft: str, store: EvidenceStore, index: CorpusIndex | None = None)
     sources = []
     for eid in cited_ids(answer):
         ev = store.get(eid)
-        url = ev.url
-        if ev.kind == "doc" and index is not None:
-            doc = index.docs.get(ev.meta.get("doc_id", ""))
-            if doc:
-                url = doc["url"]
-                if doc.get("format", "pdf") == "pdf" and ev.meta.get("unit", "page") == "page":
-                    url += f"#page={ev.meta.get('page_start', 1)}"
-        sources.append({"id": eid, "kind": ev.kind, "title": ev.title, "source": ev.source, "url": url,
-                        "excerpt": ev.text[:600], "meta": ev.meta})
+        sources.append({"id": eid, "kind": ev.kind, "title": ev.title, "source": ev.source,
+                        "url": evidence_url(ev, index), "excerpt": ev.text[:600], "meta": ev.meta})
     return answer, sources
+
+
+def evidence_url(ev: Evidence, index: CorpusIndex | None = None) -> str | None:
+    """Link to a passage's source: the document's URL, at the page for a PDF page."""
+    if ev.kind != "doc" or index is None:
+        return ev.url
+    doc = index.docs.get(ev.meta.get("doc_id", ""))
+    if not doc:
+        return ev.url
+    url = doc["url"]
+    if doc.get("format", "pdf") == "pdf" and ev.meta.get("unit", "page") == "page":
+        url += f"#page={ev.meta.get('page_start', 1)}"
+    return url

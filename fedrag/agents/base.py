@@ -68,16 +68,18 @@ class ToolAgent:
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-    async def _exec(self, ctx: RunContext, tc, task_id: str) -> str:
-        ctx.trace.emit(self.name, "tool_call", task_id=task_id, tool=tc.name, args=tc.arguments)
+    async def _exec(self, ctx: RunContext, tc, task_id: str, step: int) -> str:
+        ids = {"task_id": task_id, "step": step, "call_id": tc.id}
+        ctx.trace.emit(self.name, "tool_call", **ids, tool=tc.name, args=tc.arguments)
         if tc.parse_error:
             out = f"ERROR: {tc.parse_error}. Re-issue the call with valid JSON arguments."
         elif tc.name not in self.tools:
             out = f"ERROR: unknown tool {tc.name!r}. Available: {', '.join(self.tools)} or {FINISH}."
         else:
             out = await self.tools[tc.name](ctx, tc.arguments)
-        ctx.trace.emit(self.name, "tool_result", task_id=task_id, tool=tc.name, ids=cited_ids(out)[:12],
-                       preview=out[:300], chars=len(out))
+        ctx.trace.emit(self.name, "tool_result", **ids, tool=tc.name, ids=cited_ids(out)[:12], preview=out[:300],
+                       chars=len(out))
+        ctx.trace.transient(self.name, "tool_output", **ids, text=out)  # the whole result, for live displays
         return out
 
     async def run(self, ctx: RunContext, task: str, task_id: str = "t1", context: str = "") -> AgentResult:
@@ -103,9 +105,9 @@ class ToolAgent:
                 )
                 messages.append(resp.assistant_message())
                 if resp.reasoning:
-                    ctx.trace.emit(self.name, "thought", task_id=task_id, text=resp.reasoning[:1500])
+                    ctx.trace.emit(self.name, "thought", task_id=task_id, step=step, text=resp.reasoning[:1500])
                 elif resp.content and resp.tool_calls:
-                    ctx.trace.emit(self.name, "thought", task_id=task_id, text=resp.content[:1500])
+                    ctx.trace.emit(self.name, "thought", task_id=task_id, step=step, text=resp.content[:1500])
 
                 if not resp.tool_calls:
                     if not nudged and not last:
@@ -120,7 +122,7 @@ class ToolAgent:
                 others = [tc for tc in resp.tool_calls if tc.name != FINISH]
                 if others:
                     n_calls += len(others)
-                    outs = await asyncio.gather(*(self._exec(ctx, tc, task_id) for tc in others))
+                    outs = await asyncio.gather(*(self._exec(ctx, tc, task_id, step) for tc in others))
                     for tc, out in zip(others, outs):
                         seen += [i for i in cited_ids(out) if i not in seen]
                         messages.append({"role": "tool", "tool_call_id": tc.id, "content": out})
@@ -135,7 +137,7 @@ class ToolAgent:
             return self._finish(ctx, task_id, task, {"answer": "", "key_facts": [], "confidence": "low",
                                                      "gaps": "step budget exhausted"}, self.max_steps, n_calls, seen)
         except Exception as e:  # an agent failure must not sink the whole run
-            ctx.trace.emit(self.name, "error", error=f"{type(e).__name__}: {e}")
+            ctx.trace.emit(self.name, "error", task_id=task_id, error=f"{type(e).__name__}: {e}")
             return AgentResult(agent=self.name, task_id=task_id, task=task, answer="", confidence="low",
                                gaps=f"agent failed: {type(e).__name__}: {e}", seen_ids=seen, tool_calls=n_calls,
                                error=str(e))
