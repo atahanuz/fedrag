@@ -5,21 +5,21 @@ How a question becomes a cited answer, and how the collection is ingested, index
 ## The pipeline
 
 ```mermaid
-flowchart LR
+flowchart TB
     Q[Question + chat history] --> R[Related documents<br/>one hybrid search]
     R --> P[Planner / router]
     P -- no tools needed --> D[Direct answer]
     P -- tasks --> X{{Parallel task waves}}
-    X --> F[fed_research agent]
-    X --> T[data_analyst agent]
-    X --> W[web_research agent]
-    X --> M[market_data agent]
+    X --> F[fed_research<br/>search, read, cite]
+    X --> T[data_analyst<br/>text-to-SQL]
+    X --> W[web_research<br/>search, fetch]
+    X --> M[market_data<br/>FRED, ECB, Yahoo]
     F & T & W & M --> E[(Evidence store<br/>D# / W# / M# IDs)]
-    E --> S[Synthesizer]
-    S --> V{Verifier}
+    E --> S[Writer]
+    S --> V{Fact-checker}
     V -- accept --> A[Cited answer + sources + trace]
     V -- revise --> S
-    V -- research --> X
+    V -- follow-up tasks --> X
 ```
 
 1. **Planner (router).** Classifies the question, rewrites follow-ups into standalone questions, and

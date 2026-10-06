@@ -58,21 +58,21 @@ questions score 46 of 52 (88%). Method, per-category tables and error analysis a
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TB
     Q[Question + chat history] --> R[Related documents<br/>one hybrid search]
     R --> P[Planner / router]
     P -- no tools needed --> D[Direct answer]
     P -- tasks --> X{{Parallel task waves}}
     X --> F[fed_research<br/>search, read, cite]
     X --> T[data_analyst<br/>text-to-SQL]
-    X --> W[web_research]
+    X --> W[web_research<br/>search, fetch]
     X --> M[market_data<br/>FRED, ECB, Yahoo]
     F & T & W & M --> E[(Evidence store<br/>D# / W# / M# IDs)]
     E --> S[Writer]
     S --> V{Fact-checker}
     V -- accept --> A[Cited answer + sources + trace]
     V -- revise --> S
-    V -- research --> X
+    V -- follow-up tasks --> X
 ```
 
 1. **Planner.** Its input is today's date, a description of the collection and the documents most related to
