@@ -162,10 +162,23 @@ def test_writer_evidence_is_shared_fairly_between_agents():
     from fedrag.agents.writer import MAX_EVIDENCE_ITEMS, select_evidence
 
     store = EvidenceStore()
-    for i in range(40):
+    for i in range(MAX_EVIDENCE_ITEMS + 20):
         store.add_web(f"https://example.org/{i}", "t", "x")
     verbose = AgentResult(agent="fed_research", task_id="t1", task="", answer="",
-                          evidence_ids=[f"W{i}" for i in range(1, 31)])
-    brief = AgentResult(agent="market_data", task_id="t2", task="", answer="", evidence_ids=["W35", "W36"])
+                          evidence_ids=[f"W{i}" for i in range(1, MAX_EVIDENCE_ITEMS + 5)])
+    brief = AgentResult(agent="market_data", task_id="t2", task="", answer="",
+                        evidence_ids=[f"W{MAX_EVIDENCE_ITEMS + 10}", f"W{MAX_EVIDENCE_ITEMS + 11}"])
     sel = select_evidence([verbose, brief], store)
-    assert len(sel) == MAX_EVIDENCE_ITEMS and {"W35", "W36"} <= set(sel)
+    assert len(sel) == MAX_EVIDENCE_ITEMS and set(brief.evidence_ids) <= set(sel)
+
+
+def test_step_series_summary_lists_every_change():
+    from fedrag.tools.market import _summarize_series
+
+    d0 = dt.date(2025, 1, 1)
+    target = [((d0 + dt.timedelta(days=i)).isoformat(), 4.25 if i < 260 else 4.0 if i < 300 else 3.75)
+              for i in range(400)]
+    text = _summarize_series("FRED DFEDTARL", target, is_rate=True)
+    assert "2 change(s)" in text and "2025-09-18: 4.25 -> 4" in text and "2025-10-28: 4 -> 3.75" in text
+    noisy = [((d0 + dt.timedelta(days=i)).isoformat(), 4 + (i % 7) / 100) for i in range(400)]
+    assert "observations (sampled)" in _summarize_series("FRED DGS2", noisy, is_rate=True)

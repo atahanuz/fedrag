@@ -112,6 +112,8 @@ async def rerank(req: RerankRequest) -> dict:
 # LLM reverse proxy (supports streaming)
 # ---------------------------------------------------------------------------
 
+PAD_AFTER, PAD_EVERY = 60.0, 15.0  # seconds: see _proxy
+
 
 async def _proxy(request: Request, path: str) -> Response:
     client: httpx.AsyncClient = state["http"]
@@ -119,9 +121,27 @@ async def _proxy(request: Request, path: str) -> Response:
     headers = {"content-type": request.headers.get("content-type", "application/json")}
     wants_stream = b'"stream": true' in body or b'"stream":true' in body
     if not wants_stream:
-        r = await client.request(request.method, path, content=body, headers=headers)
-        return Response(content=r.content, status_code=r.status_code,
-                        media_type=r.headers.get("content-type", "application/json"))
+        # Cloudflare's quick tunnel answers 524 when the first byte takes more than 100 s, and the client's
+        # retry then runs next to the abandoned request. A call still running after 60 s therefore starts its
+        # response and sends a space every 15 s (JSON allows leading whitespace) until the body is ready.
+        task = asyncio.create_task(client.request(request.method, path, content=body, headers=headers))
+        done, _ = await asyncio.wait({task}, timeout=PAD_AFTER)
+        if task in done:
+            r = task.result()
+            return Response(content=r.content, status_code=r.status_code,
+                            media_type=r.headers.get("content-type", "application/json"))
+
+        async def padded():
+            try:
+                while not task.done():
+                    yield b" "
+                    await asyncio.wait({task}, timeout=PAD_EVERY)
+                yield task.result().content
+            finally:
+                if not task.done():  # the client went away: stop the generation
+                    task.cancel()
+
+        return StreamingResponse(padded(), status_code=200, media_type="application/json")
 
     req = client.build_request(request.method, path, content=body, headers=headers)
     r = await client.send(req, stream=True)

@@ -57,6 +57,12 @@ Special cases:
   date of the latest decision"), score whether the answer does that.
 - Unanswerable / out-of-collection questions: the answer must clearly say the information is not available
   (it may add correctly sourced alternatives). Inventing content scores 0.
+- Ambiguous questions: the reference says which interpretations are acceptable. The answer must state the
+  interpretation it chose (e.g. which meeting, report or rate) or ask a clarifying question where the
+  reference allows it; a correct answer to an unstated interpretation is at most 1.
+- Broad questions and lists: the reference names the points a good answer covers ("should cover most of",
+  "at least four of"). Score 2 when the answer covers the required number of points correctly, 1 when it
+  covers fewer or some are wrong, 0 when it misses the substance or invents facts.
 Be strict about numbers, dates and names."""
 
 JUDGE_SCHEMA = {
@@ -88,6 +94,21 @@ def routing_ok(q: dict, used: list[str]) -> bool:
     return True
 
 
+def source_doc(s: dict) -> str:
+    """The document a cited source comes from (several passages of one report count once)."""
+    meta = s.get("meta") or {}
+    if meta.get("unit") == "query":
+        return "+".join(meta.get("doc_ids") or [meta.get("doc_id", "")])
+    return meta.get("doc_id") or (s.get("url") or s["source"]).split("#")[0]
+
+
+def docs_cited(r: dict) -> int:
+    docs = set()
+    for s in r.get("sources", []):
+        docs.update((s.get("doc") or s["source"]).split("+"))
+    return len(docs)
+
+
 async def run_one(orch: Orchestrator, q: dict, sem: asyncio.Semaphore, today: dt.date) -> dict:
     async with sem:
         t0 = time.time()
@@ -98,7 +119,8 @@ async def run_one(orch: Orchestrator, q: dict, sem: asyncio.Semaphore, today: dt
                                             if e.type not in ("delta", "tool_output") else None])
             rec = {"id": q["id"], "category": q["category"], "question": q["question"],
                    "answer": res.answer, "agents_used": res.agents_used, "plan": res.plan,
-                   "sources": [{k: s[k] for k in ("id", "kind", "source", "url")} for s in res.sources],
+                   "sources": [{**{k: s[k] for k in ("id", "kind", "source", "url")}, "doc": source_doc(s)}
+                               for s in res.sources],
                    "verifications": [v["verdict"] for v in res.verifications], "usage": res.usage,
                    "seconds": res.seconds, "trace": res.trace, "error": None}
         except Exception as e:
@@ -153,6 +175,7 @@ def summarize(records: list[dict]) -> dict:
             "mean_score": round(sum(r["score"] for r in rs) / len(rs) / 2, 3),
             "cited_rate": round(sum(bool(r["sources"]) for r in tool_rs) / len(tool_rs), 3) if tool_rs else None,
             "median_seconds": round(statistics.median(r["seconds"] for r in rs), 1),
+            "mean_docs_cited": round(statistics.mean(docs_cited(r) for r in rs), 1),
             "mean_llm_calls": round(statistics.mean(r["usage"].get("llm_calls", 0) for r in rs), 1),
             "mean_tool_calls": round(statistics.mean(sum(r["usage"].get("tool_calls", {}).values()) for r in rs), 1),
         }
@@ -161,14 +184,16 @@ def summarize(records: list[dict]) -> dict:
 
 
 def print_table(summary: dict) -> None:
-    hdr = f"{'category':<20}{'n':>4}{'routing':>9}{'correct':>9}{'score':>8}{'cited':>8}{'med s':>8}{'llm':>6}{'tools':>7}"
+    hdr = (f"{'category':<20}{'n':>4}{'routing':>9}{'correct':>9}{'score':>8}{'cited':>8}{'docs':>6}{'med s':>8}"
+           f"{'llm':>6}{'tools':>7}")
     print("\n" + hdr + "\n" + "-" * len(hdr))
     rows = list(summary["by_category"].items()) + [("OVERALL", summary["overall"])]
     for c, a in rows:
         cited = f"{a['cited_rate']:.2f}" if a["cited_rate"] is not None else "-"
         routing = f"{a['routing_acc']:.2f}" if a["routing_acc"] is not None else "-"
         print(f"{c:<20}{a['n']:>4}{routing:>9}{a['correct_rate']:>9.2f}{a['mean_score']:>8.2f}"
-              f"{cited:>8}{a['median_seconds']:>8.1f}{a['mean_llm_calls']:>6.1f}{a['mean_tool_calls']:>7.1f}")
+              f"{cited:>8}{a['mean_docs_cited']:>6.1f}{a['median_seconds']:>8.1f}{a['mean_llm_calls']:>6.1f}"
+              f"{a['mean_tool_calls']:>7.1f}")
 
 
 async def main() -> None:
@@ -182,9 +207,11 @@ async def main() -> None:
     ap.add_argument("--naive", action="store_true", help="naive RAG baseline: one retrieval + one LLM call")
     ap.add_argument("--tag", default="")
     ap.add_argument("--no-judge", action="store_true", help="save the answers without grading them")
+    ap.add_argument("--questions", default="questions.jsonl", help="question file in eval/ (questions_hard.jsonl: "
+                    "multi-source, ambiguous and broad questions)")
     args = ap.parse_args()
 
-    questions = [json.loads(line) for line in open(HERE / "questions.jsonl")]
+    questions = [json.loads(line) for line in open(HERE / args.questions)]
     qmap = {q["id"]: q for q in questions}
     if args.ids:
         questions = [q for q in questions if q["id"] in args.ids]

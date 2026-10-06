@@ -108,7 +108,7 @@ const ABOUT = {
   question: "Typed above or picked from the examples on the left.",
   planner: "Reads the question and decides which agents to summon, what each must find and in what order.",
   fed_research: "Searches and reads the collection's PDFs, web pages and Word files, citing pages.",
-  data_analyst: "Finds the right table among 846, reads its schema and notes, answers with read-only SQL.",
+  data_analyst: "Finds the right table among nearly 1,000, reads its schema and notes, answers with read-only SQL.",
   web_research: "Searches the web and reads pages: news and anything outside the collection.",
   market_data: "Live FRED series, ECB exchange rates and daily market prices.",
   synthesizer: "Writes the answer from the agents' findings, citing every claim.",
@@ -119,6 +119,7 @@ const ABOUT = {
 const TOOLS = {
   search_fed_documents: { icon: "search", color: "--c-fed" },
   find_documents: { icon: "search", color: "--c-fed" },
+  search_each_document: { icon: "layers", color: "--c-fed" },
   list_fed_documents: { icon: "list", color: "--c-fed" },
   get_document_outline: { icon: "list", color: "--c-fed" },
   read_document_pages: { icon: "file", color: "--c-fed" },
@@ -140,6 +141,7 @@ const TOOLS = {
 const SEARCH_STACK = () => `BM25 + ${models().embedder} → ${models().reranker}`;
 const TOOL_BACKEND = {
   search_fed_documents: SEARCH_STACK, find_documents: SEARCH_STACK, search_tables: SEARCH_STACK,
+  search_each_document: () => `per-document BM25 + ${models().embedder} → ${models().reranker}`,
   list_fed_documents: () => "collection catalog", get_document_outline: () => "collection catalog",
   read_document_pages: () => "parsed page store", expand_context: () => "parsed page store",
   list_tables: () => "table catalog", describe_table: () => "DuckDB", query_data: () => "DuckDB (read-only SQL)",
@@ -659,6 +661,7 @@ function nodeBody(run, n) {
     case "question":
       return idle ? esc(ABOUT.question) : esc(run.question);
     case "planner":
+      if (n.plan && (n.plan.assumptions || []).length) return esc("Reading it as: " + n.plan.assumptions.join("; "));
       if (n.plan) return esc(n.plan.reasoning || "");
       return n.status === "running" ? "Reading the question, choosing agents and writing their tasks…" : esc(ABOUT.planner);
     case "agent":
@@ -1056,7 +1059,8 @@ function argsHTML(c) {
   const q = (s) => `<span class="qtext">${esc(s || "")}</span>`;
   switch (c.tool) {
     case "query_data": return `<pre class="sql">${highlightSQL(formatSQL(a.sql || ""))}</pre>${argChips(a, ["sql"])}`;
-    case "search_fed_documents": case "search_tables": case "web_search": return q(a.query) + argChips(a, ["query"]);
+    case "search_fed_documents": case "search_tables": case "web_search": case "search_each_document":
+      return q(a.query) + argChips(a, ["query"]);
     case "find_documents": return q(a.topic) + argChips(a, ["topic"]);
     case "search_economic_series": return q(a.keywords);
     case "calculator": return `<code>${esc(a.expression || "")}</code>`;
@@ -1155,8 +1159,12 @@ function plannerInspector(run, n) {
   let html = `<div class="sec"><div class="kv"><span class="k">Intent</span><span><span class="badge intent">${esc(INTENTS[p.intent] || p.intent)}</span></span>
     <span class="k">Tools needed</span><span>${p.needs_tools ? "yes" : "no: answer directly"}</span>
     ${u ? `<span class="k">LLM</span><span>${fmtNum(u.prompt_tokens)} prompt tokens · ${fmtNum(u.completion_tokens)} generated · ${fmtSec(u.seconds)}</span>` : ""}</div></div>`;
+  if ((p.assumptions || []).length) html += `<div class="sec"><div class="sec-title">Interpretation of an ambiguous question<span class="line"></span></div>${p.assumptions.map((x) => `<div class="issue"><span class="n">→</span><span>${esc(x)}</span></div>`).join("")}</div>`;
   html += `<div class="sec"><div class="sec-title">Reasoning<span class="line"></span></div><div class="box quote" style="--c:var(--c-planner)">${esc(p.reasoning || "")}</div></div>`;
   if (p.standalone_question && p.standalone_question.trim() !== run.question.trim()) html += `<div class="sec"><div class="sec-title">Question as the agents see it<span class="line"></span></div><div class="box">${esc(p.standalone_question)}</div></div>`;
+  if ((p.related_docs || []).length) html += `<div class="sec"><div class="sec-title">Documents a quick search found first<span class="line"></span></div>` +
+    `<div class="card-sub" style="margin-bottom:6px">Shown to the planner so its tasks cover the sources that discuss the topic.</div>` +
+    `<div class="box" style="font-size:12px;line-height:1.55">${p.related_docs.map((l) => esc(l.replace(/^- /, "· ").replace(/ \| best match:.*$/, ""))).join("<br>")}</div></div>`;
   const tasks = p.tasks || [];
   if (tasks.length) {
     html += `<div class="sec"><div class="sec-title">${plural(tasks.length, "task")}<span class="line"></span></div><div class="task-list">${tasks.map((t) => {
@@ -1237,8 +1245,8 @@ function demoInspector(id) {
     tools.length ? `<div class="sec"><div class="sec-title">Tools<span class="line"></span></div><div class="tools" style="display:flex;flex-wrap:wrap;gap:6px">${tools.map((t) => `<span class="tool-chip" style="--tc:var(${toolMeta(t).color})">${icon(toolMeta(t).icon, 12)}${esc(t)}</span>`).join("")}</div></div>` : ""].join("");
 }
 function legendInspector() {
-  const items = [["planner", "Planner", "routes the question and writes one task per agent."], ["fed_research", "Fed research", "searches and reads the 391 documents."],
-    ["data_analyst", "Data analyst", "queries the 846 SQL tables."], ["web_research", "Web research", "searches and reads the open web."],
+  const items = [["planner", "Planner", "routes the question and writes one task per agent."], ["fed_research", "Fed research", "searches and reads the 725 documents."],
+    ["data_analyst", "Data analyst", "queries the 978 SQL tables."], ["web_research", "Web research", "searches and reads the open web."],
     ["market_data", "Market data", "FRED, ECB and market prices."], ["synthesizer", "Writer", "writes the cited answer."], ["verifier", "Fact-checker", "accepts, revises or asks for more research."]];
   return `<div class="insp-empty"><div class="big">${icon("layers", 30)}</div>Run a question or open a saved run, then click any step of the pipeline to see what it did.
     <div class="legend-list">${items.map(([a, l, d]) => `<div class="legend-item"><span class="n-ico" style="--c:var(${agentMeta(a).color});width:24px;height:24px;border-radius:7px;color:var(--c);background:color-mix(in srgb, var(--c) var(--mix), transparent);display:grid;place-items:center">${icon(agentMeta(a).icon, 13)}</span><span><b>${l}</b> ${d}</span></div>`).join("")}
@@ -1319,7 +1327,7 @@ function renderWelcome() {
   $("#view").innerHTML = `
     <section class="card hero">
       <h1>Ask the Federal Reserve collection</h1>
-      <p>A planner reads your question and summons specialist agents. They search ${info ? info.docs : 391} Fed documents, query ${info ? info.tables : 846} tables with SQL, read the web and pull live market data. You see every step as it happens, from the plan to the fact-checked answer with its citations.</p>
+      <p>A planner reads your question and summons specialist agents. They search ${info ? info.docs : 725} Fed documents, query ${info ? info.tables : 978} tables with SQL, read the web and pull live market data. You see every step as it happens, from the plan to the fact-checked answer with its citations.</p>
     </section>
     <section class="card">
       <div class="card-head"><span class="card-title">How a question flows</span><span class="card-sub">the planner summons only the agents a question needs; click a step</span></div>

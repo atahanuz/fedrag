@@ -37,6 +37,8 @@ def stats(runs: list[list[dict]], ids: set[str] | None = None) -> dict:
         "cited": sum(bool(r["sources"]) for r in tool_rs) / len(tool_rs) if tool_rs else None,
         "errors": sum(bool(r.get("error")) for r in rs) / len(runs),
         "median_s": statistics.median(r["seconds"] for r in rs),
+        "docs_cited": statistics.mean(len({d for x in r["sources"] for d in (x.get("doc") or x["source"]).split("+")})
+                                      for r in rs),
         "llm_calls": statistics.mean(r["usage"].get("llm_calls", 0) for r in rs if r.get("usage")),
         "tool_calls": statistics.mean(sum(r["usage"].get("tool_calls", {}).values()) for r in rs if r.get("usage")),
         "prompt_k": statistics.mean(r["usage"].get("prompt_tokens", 0) for r in rs if r.get("usage")) / 1000,
@@ -65,7 +67,7 @@ def main() -> None:
             ("correct rate", lambda s: f"{s['correct_rate']:.0%}"), ("mean score", lambda s: f"{s['mean_score']:.2f}"),
             ("wrong (0) per run", lambda s: f"{s['zeros']:.1f}"), ("routing", lambda s: f"{s['routing']:.0%}"),
             ("cited", lambda s: f"{s['cited']:.0%}" if s["cited"] is not None else "-"),
-            ("run errors per run", lambda s: f"{s['errors']:.1f}"), ("median seconds", lambda s: f"{s['median_s']:.0f}"),
+            ("run errors per run", lambda s: f"{s['errors']:.1f}"), ("documents cited / q", lambda s: f"{s['docs_cited']:.1f}"), ("median seconds", lambda s: f"{s['median_s']:.0f}"),
             ("LLM calls / q", lambda s: f"{s['llm_calls']:.1f}"), ("tool calls / q", lambda s: f"{s['tool_calls']:.1f}"),
             ("prompt tokens / q", lambda s: f"{s['prompt_k']:.0f}k"), ("generated / q", lambda s: f"{s['gen_k']:.1f}k")]
     for name, fmt in rows:

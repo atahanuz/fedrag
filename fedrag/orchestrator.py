@@ -103,12 +103,16 @@ class Orchestrator:
         today_s = today.strftime("%A, %B %d, %Y")
         try:
             trace.emit("planner", "agent_start", task="route and decompose the question")
+            related = await self._related_docs(question, history)
             plan = await make_plan(self.llm, question, today_s, self.index.corpus_card(), history,
                                    dataset_card=self.index.dataset_card(), n_docs=len(self.index.docs),
-                                   n_tables=sum(1 for t in self.index.tables.catalog.values() if t["kind"] == "table"))
-            trace.emit("planner", "plan", **plan.as_dict())
+                                   n_tables=sum(1 for t in self.index.tables.catalog.values() if t["kind"] == "table"),
+                                   related=related)
+            trace.emit("planner", "plan", **plan.as_dict(), related_docs=related.splitlines())
             q = plan.standalone_question or question
             history_note = "" if q == question else f"(Standalone form of the question: {q})\n"
+            if plan.assumptions:
+                history_note += "Interpretation of the ambiguous question: " + "; ".join(plan.assumptions) + "\n"
 
             if not plan.needs_tools:
                 trace.emit("direct", "agent_start", task="answer from general knowledge")
@@ -167,6 +171,17 @@ class Orchestrator:
         finally:
             if ctx.http is not None:
                 await ctx.http.aclose()
+
+    async def _related_docs(self, question: str, history: list[dict] | None) -> str:
+        """Retrieval-aware planning: the documents a quick search finds most related to the question, so the
+        planner can assign tasks to the reports, speeches and notes that actually discuss the topic."""
+        query = question if not history else f"{history[-1]['question']} {question}"
+        try:
+            docs = await self.index.related_docs(query, k=12)
+        except Exception:  # planning still works without the hint
+            return ""
+        return "\n".join(f"- {d['doc_type']} | {d['date']} | {d['title'][:110]} | best match: "
+                         f"{(c.get('section') or '-')[:70]}" for d, c in docs)
 
     # ------------------------------------------------------------------ output
     def _result(self, question: str, draft: str, ctx: RunContext, plan: Plan, results: list[AgentResult],

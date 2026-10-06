@@ -253,26 +253,42 @@ def discover(f: Fetcher) -> list[dict]:
             rows.append(_row(f"fed_sep_{date}.html", "economic_projections",
                              f"Summary of Economic Projections, FOMC meeting ending {label}", date,
                              f"{FED}/monetarypolicy/fomcprojtabl{d8}.htm"))
-    for d8 in sorted(set(re.findall(r"monetary(2026\d{4})a\.htm", cal))):
+    for d8 in sorted(set(re.findall(r"monetary(20(?:23|24|25|26)\d{4})a\.htm", cal))):
         date = f"{d8[:4]}-{d8[4:6]}-{d8[6:]}"
         label = dt.date.fromisoformat(date).strftime("%B %-d, %Y")
         rows.append(_row(f"fed_fomc_presconf_{date}.pdf", "press_conference",
                          f"Transcript of the Chair's FOMC press conference, {label}", date,
                          f"{FED}/mediacenter/files/FOMCpresconf{d8}.pdf"))
+    for d8 in sorted(set(re.findall(r"fomcminutes(2022\d{4})\.htm", cal))):  # 2023 on are in the base set
+        date = f"{d8[:4]}-{d8[4:6]}-{d8[6:]}"
+        label = dt.date.fromisoformat(date).strftime("%B %-d, %Y")
+        rows.append(_row(f"fed_fomc_minutes_{date}.pdf", "meeting_minutes",
+                         f"Minutes of the Federal Open Market Committee, meeting ending {label}", date,
+                         f"{FED}/monetarypolicy/files/fomcminutes{d8}.pdf"))
 
-    # Other 2026 press releases: regulation, announcements, discount-rate minutes (not FOMC pointers)
+    # Beige Books 2023-2024 (2025 on are in the base set)
+    for year in (2023, 2024):
+        page = f.text(f"{FED}/monetarypolicy/beigebook{year}.htm")
+        for d8 in sorted(set(re.findall(r"BeigeBook_(\d{8})\.pdf", page))):
+            date = f"{d8[:4]}-{d8[4:6]}-{d8[6:]}"
+            label = dt.date.fromisoformat(date).strftime("%B %Y")
+            rows.append(_row(f"fed_beige_book_{date}.pdf", "economic_conditions_report",
+                             f"Beige Book: Summary of Commentary on Current Economic Conditions, {label}", date,
+                             f"{FED}/monetarypolicy/files/BeigeBook_{d8}.pdf"))
+
+    # Other 2025-2026 press releases: regulation, announcements, discount-rate minutes (not FOMC pointers)
     skip = re.compile(r"issues FOMC statement|Minutes of the Federal Open Market Committee|release economic "
                       r"projections|Longer-Run Goals", re.I)
     for p in press:
         link, title, date = p.get("l") or "", p.get("t") or "", _mdy(p.get("d"))
-        if not link or not date.startswith("2026") or skip.search(title):
+        if not link or date < "2025-01-01" or skip.search(title):
             continue
         if p.get("pt") in ("Banking and Consumer Regulatory Policy", "Other Announcements", "Monetary Policy"):
             slug = Path(link).stem
             rows.append(_row(f"fed_press_release_{slug}.html", "press_release", _clean(title), date, FED + link))
 
-    # Speeches (2026) and testimony (2025-2026)
-    for kind, url, year_from in (("speech", "/json/ne-speeches.json", "2026"),
+    # Speeches and testimony (2025-2026)
+    for kind, url, year_from in (("speech", "/json/ne-speeches.json", "2025"),
                                  ("testimony", "/json/ne-testimony.json", "2025")):
         for s in f.json(FED + url):
             date, link = _mdy(s.get("d")), s.get("l") or ""
@@ -284,10 +300,11 @@ def discover(f: Fetcher) -> list[dict]:
                 title += f" ({_clean(s['lo'])})"
             rows.append(_row(f"fed_{kind}_{Path(link).stem}.html", kind, title, date, FED + link, speaker=speaker))
 
-    # FEDS Notes (2026)
-    idx = f.text(f"{FED}/econres/notes/feds-notes/2026-index.htm")
+    # FEDS Notes (2025-2026)
+    idx = f.text(f"{FED}/econres/notes/feds-notes/2026-index.htm") + \
+        f.text(f"{FED}/econres/notes/feds-notes/2025-index.htm")
     seen = set()
-    for link, d8, title in re.findall(r'href="(/econres/notes/feds-notes/[^"]+-(2026\d{4})\.html?)"[^>]*>\s*'
+    for link, d8, title in re.findall(r'href="(/econres/notes/feds-notes/[^"]+-(202[56]\d{4})\.html?)"[^>]*>\s*'
                                       r'([^<]+?)\s*<', idx):
         if link in seen:
             continue
@@ -297,8 +314,8 @@ def discover(f: Fetcher) -> list[dict]:
         rows.append(_row(f"fed_feds_note_{date}_{slug}.html", "feds_note", f"FEDS Notes: {_clean(title)}", date,
                          FED + link))
 
-    # SR letters (2025-2026); the date is in the letter itself
-    for year in (2025, 2026):
+    # SR letters (2024-2026); the date is in the letter itself
+    for year in (2024, 2025, 2026):
         page = f.text(f"{FED}/supervisionreg/srletters/{year}.htm")
         for link, num, rest in re.findall(r'<a href="(/supervisionreg/srletters/SR\d+\.htm)"[^>]*>\s*(SR [\d-]+)\s*'
                                           r'</a>(.{0,600}?)</(?:tr|p|li)>', page, re.S):

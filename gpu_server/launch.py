@@ -48,8 +48,11 @@ USE_MTP = _opt("FEDRAG_LLM_MTP", "mtp", "1") == "1"  # Qwen3.8's multi-token-pre
 TOOL_PARSER = _opt("FEDRAG_LLM_TOOL_PARSER", "tool_parser", "qwen3_xml")
 REASONING_PARSER = _opt("FEDRAG_LLM_REASONING_PARSER", "reasoning_parser", "qwen3")
 QUANT = _opt("FEDRAG_LLM_QUANT", "quant", "")  # e.g. fp8: quantize a bf16 checkpoint while loading it
+# Under JSON-schema decoding, models sometimes pad with whitespace instead of closing the object until the
+# token limit (seen with Gemma 4 and, in about one plan in three under load, Qwen3.8): no free whitespace.
+DEFAULT_EXTRA_ARGS = ["--structured-outputs-config", '{"backend": "xgrammar", "disable_any_whitespace": true}']
 _extra = os.environ.get("FEDRAG_LLM_EXTRA_ARGS")  # JSON list of further `vllm serve` arguments
-EXTRA_ARGS: list[str] = json.loads(_extra) if _extra else _choice.get("extra_args", [])
+EXTRA_ARGS: list[str] = json.loads(_extra) if _extra else _choice.get("extra_args", DEFAULT_EXTRA_ARGS)
 CLOUDFLARED = "/usr/local/bin/cloudflared"
 GATEWAY_LOCAL = "http://127.0.0.1:8000"
 TUNNEL_PATTERN = f"cloudflared tunnel --no-autoupdate --url {GATEWAY_LOCAL}"  # only our own tunnel
@@ -215,11 +218,15 @@ def main() -> None:
     args = ap.parse_args()
     if args.restart_llm:
         subprocess.run(["pkill", "-f", "vllm serve"])
-        for _ in range(60):  # wait for the old engine to give its GPU memory back
+        # the gateway's embedder and reranker keep PyTorch's cached memory from large rerank batches (24 GB
+        # at start, 31 GB after a heavy evaluation): restart it too, so vLLM finds its share free
+        subprocess.run(["pkill", "-f", "uvicorn gateway:app"])
+        for _ in range(60):  # wait for the old processes to give their GPU memory back
             time.sleep(2)
-            if not _running("vllm serve") and not _running("VLLM::EngineCore"):
+            if not any(_running(p) for p in ("vllm serve", "VLLM::EngineCore", "uvicorn gateway:app")):
                 break
         time.sleep(5)
+        start_gateway(api_key())
         start_vllm()
         print(f"starting {LLM_MODEL} as {SERVED_NAME}", flush=True)
         return

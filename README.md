@@ -1,10 +1,10 @@
 # fedrag — Agentic RAG over a mixed-format Federal Reserve collection
 
-A multi-agent research assistant that answers questions from a collection of **391 Federal Reserve
+A multi-agent research assistant that answers questions from a collection of **725 Federal Reserve
 documents in five formats**: PDF reports, web pages, Word files, Excel workbooks and CSV files, dated 2022 to
 October 2026. They include FOMC minutes, statements, projections and press conferences, Beige Books,
 Monetary Policy and Financial Stability Reports, stress tests with bank-level results, speeches, testimony,
-FEDS Notes and working papers, supervision letters and household and forecaster surveys. The **846 tables**
+FEDS Notes and working papers, supervision letters and household and forecaster surveys. The **978 tables**
 inside the spreadsheets, CSV files, web pages and Word files are extracted into a SQL database that an agent
 queries. The system also handles questions that are only partly about the collection, or not at all:
 
@@ -25,7 +25,8 @@ summons, every tool call and SQL query, the passages they cite and the fact-chec
 
 ```mermaid
 flowchart LR
-    Q[Question + chat history] --> P[Planner / router]
+    Q[Question + chat history] --> R[Related documents<br/>one hybrid search]
+    R --> P[Planner / router]
     P -- no tools needed --> D[Direct answer]
     P -- tasks --> X{{Parallel task waves}}
     X --> F[fed_research agent]
@@ -45,12 +46,20 @@ flowchart LR
    description of the collection (types, formats, dates, speakers) and of the main datasets, so it knows
    which agent owns which part and when the collection cannot be enough. It returns a
    JSON-schema-constrained plan. Comparisons over time become parallel tasks, and tasks may depend on each
-   other's results.
+   other's results. Before planning, one hybrid search lists the 12 documents most related to the question,
+   so tasks name the reports, speeches and notes that actually discuss the topic; for what "the Fed" says,
+   the official voices come first (FOMC statements and projections, the Chair, the Board's reports), then
+   Governors' speeches and staff research. For an ambiguous question ("the last meeting", "the current
+   rate", a bare "Who dissented?") the planner records how it reads it (`assumptions`, e.g. "'last meeting' =
+   the September 15-16, 2026 FOMC meeting"); relative words such as "recently" mean the most recent items
+   available, never a fixed window.
 2. **Specialist agents.** Each one is a ReAct loop over native function calling. In each turn the model
    may call several tools at once; they run concurrently. The agent finishes by calling
    `submit_findings` (answer, cited key facts, confidence, gaps).
-   - `fed_research`: `search_fed_documents` (hybrid search with type, date and document filters; it also
-     points to related data tables), `find_documents` (which documents discuss a topic),
+   - `fed_research`: `search_fed_documents` (hybrid search with type, date and document filters, at most
+     two passages per document; it also points to related data tables), `search_each_document` (one query
+     inside every document of a set, such as each FOMC statement of 2025 or every 2024 Beige Book, so no
+     member is crowded out), `find_documents` (which documents discuss a topic),
      `list_fed_documents` (resolves "latest", "the June meeting", "Waller's speeches" and so on),
      `get_document_outline`, `read_document_pages` (whole pages of a PDF, ~600-word parts of a web page or
      Word file, a table preview of a spreadsheet), `expand_context` (neighbouring passages), `calculator`.
@@ -65,9 +74,12 @@ flowchart LR
      `search_economic_series`, `get_market_prices` (Yahoo via the local `stockcache`), `calculator`.
 3. **Corrective step.** If no agent found any evidence, a web-research task is added automatically.
 4. **Synthesizer.** Writes the answer from the findings and the evidence excerpts, with an inline
-   citation (`[D3]`, `[W2]`, `[M1]`) on every fact. A SQL result is evidence too: the writer and the
+   citation (`[D3]`, `[W2]`, `[M1]`) on every fact. It states the planner's interpretation of an ambiguous
+   question first, covers every member of a set (or says which ones the evidence lacks), organizes broad
+   answers by theme and source, and shows conflicting figures side by side with their sources. A SQL result is evidence too: the writer and the
    verifier see the query and its rows, and the source list names the table and its document.
-5. **Verifier.** Checks support, completeness, date consistency and arithmetic. It returns `accept`,
+5. **Verifier.** Checks support, completeness (every member of a set; a stated interpretation), date
+   consistency and arithmetic. It returns `accept`,
    `revise` (the synthesizer fixes the listed problems) or `research` (follow-up tasks run, then the answer
    is rewritten).
 6. **Output.** The answer, its source list (PDF citations link to the exact page; web pages, Word files
@@ -75,12 +87,13 @@ flowchart LR
 
 ### The collection
 
-`federal_reserve/README.md` describes it in detail: 103 PDFs, 264 web pages, 2 Word files, 5 Excel
-workbooks (310 sheets, 36 of them charts) and 17 CSV files; 387 from the Board, 4 from the New York and
-Philadelphia Feds.
+`federal_reserve/README.md` describes it in detail: 151 PDFs, 550 web pages, 2 Word files, 5 Excel
+workbooks (310 sheets, 36 of them charts) and 17 CSV files; 721 from the Board, 4 from the New York and
+Philadelphia Feds. Speeches, FEDS Notes and press releases cover 2025-2026, press conferences and Beige
+Books 2023-2026 and minutes 2022-2026, so questions can span several years and many sources.
 `scripts/fetch_corpus.py --discover` crawled the Board's indexes (press releases, speeches, testimony,
-FEDS Notes, SR letters, SLOOS, the FOMC calendar) and a curated list of data files to grow the original 93
-PDFs; `metadata.csv` records each file's URL, SHA-256, format, publisher, speaker and, for data files whose
+FEDS Notes, SR letters, SLOOS, the FOMC calendar, the Beige Book archive) and a curated list of data files
+to grow the original 93 PDFs; `metadata.csv` records each file's URL, SHA-256, format, publisher, speaker and, for data files whose
 columns are codes, a short data dictionary.
 
 ### Ingestion (`fedrag/ingest/`)
@@ -112,12 +125,12 @@ outline, table blocks), so sectioning, chunking, retrieval and citation work the
 - **Sections and chunks** (`chunker.py`): every paragraph gets a section path from the outline plus
   headings detected from the font or markup, for example `Federal Reserve Bank of Chicago > Manufacturing`.
   Chunks of about 260 words never cross a top-level section, so a Beige Book chunk belongs to exactly one
-  District: 9,575 prose chunks in all.
-- **Tables** (`build_corpus.py`): the 846 table blocks become DuckDB tables, and 20 views stack a table
+  District: 14,770 prose chunks in all.
+- **Tables** (`build_corpus.py`): the 978 table blocks become DuckDB tables, and 20 views stack a table
   that recurs across releases (SEP Table 1 for all 15 meetings since March 2023, stress-test scenarios for
   2024-2026) with `doc_id` and `doc_date` columns. Each table also gets a **table card** for retrieval: its
   title, source, columns with labels and examples, units and notes, the data dictionary, row labels or
-  period range, and for small tables the rows themselves (866 cards).
+  period range, and for small tables the rows themselves (998 cards).
 
 ### Retrieval and SQL (`fedrag/retrieval/`)
 
@@ -126,8 +139,8 @@ outline, table blocks), so sectioning, chunking, retrieval and citation work the
   the top 40 reranked by **Qwen3-Reranker-4B**. Without the GPU it falls back to BM25 only. Document search
   returns prose passages and lists matching table cards as pointers; table search ranks only cards.
 - **Embeddings are incremental**: vectors are keyed by the hash of the text they embed, so rebuilding
-  the corpus re-embeds only new or changed chunks (the 6,368 chunks of the original PDFs were reused when
-  the collection grew to 10,441 chunks). `colab_up.py` runs the batch job for large updates; with the
+  the corpus re-embeds only new or changed chunks (growing from 10,441 to 15,768 chunks embedded only the
+  5,327 new ones, in about 6 minutes). `colab_up.py` runs the batch job for large updates; with the
   gateway already running, `python -m fedrag.retrieval.index embed-missing` embeds a few changed chunks
   through it in seconds.
 - **SQL** (`tables.py`): DuckDB opened read-only, with external access disabled and the configuration
@@ -153,7 +166,7 @@ through vLLM's Marlin kernels.
 # 1. Environment (Python 3.11+)
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[ui,dev]"
 
-# 2. Download the collection (391 files, 199 MB; checks each SHA-256 in federal_reserve/metadata.csv)
+# 2. Download the collection (725 files, 269 MB; checks each SHA-256 in federal_reserve/metadata.csv)
 .venv/bin/python scripts/fetch_corpus.py            # --discover also looks for new documents
 
 # 3. Parse every document into pages, sections, chunks and SQL tables (about 20 s; writes data/corpus/)
@@ -204,7 +217,7 @@ heartbeat and token refresh (without the keeper).
 
 ### Pipeline explorer (web GUI)
 
-`fedrag ui` serves a page where you type a question, or pick one of 15 examples (simple ones need one agent and
+`fedrag ui` serves a page where you type a question, or pick one of 18 examples (simple ones need one agent and
 one source, complex ones several agents and formats), and watch the pipeline run:
 
 ![Pipeline explorer during a run](docs/explorer.png)

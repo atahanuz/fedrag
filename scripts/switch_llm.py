@@ -3,7 +3,8 @@
     python scripts/switch_llm.py gemma    # google/gemma-4-31B-it, FP8 on load
     python scripts/switch_llm.py qwen     # back to Qwen/Qwen3.8-27B-FP8 (the default)
 
-The choice is written to /content/fedrag_llm.json on the VM, so the heartbeat's restarts serve the same
+Both presets get launch.py's default structured-output setting (no free whitespace in JSON). The choice is
+written to /content/fedrag_llm.json on the VM, so the heartbeat's restarts serve the same
 model, and FEDRAG_LLM_MODEL (the served name the clients ask for) is written to the local .env.
 """
 
@@ -22,9 +23,7 @@ PRESETS = {
     "qwen": {"model": "Qwen/Qwen3.8-27B-FP8", "name": "qwen3.8-27b", "tool_parser": "qwen3_xml",
              "reasoning_parser": "qwen3", "mtp": "1", "quant": ""},
     "gemma": {"model": "google/gemma-4-31B-it", "name": "gemma-4-31b", "tool_parser": "gemma4",
-              "reasoning_parser": "gemma4", "mtp": "0", "quant": "fp8",
-              # under JSON-schema decoding Gemma pads with whitespace instead of closing the object
-              "extra_args": ["--structured-outputs-config", '{"backend": "xgrammar", "disable_any_whitespace": true}']},
+              "reasoning_parser": "gemma4", "mtp": "0", "quant": "fp8"},
 }
 
 

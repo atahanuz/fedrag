@@ -172,6 +172,16 @@ def _summarize_series(name: str, series: list[tuple[str, float]], unit: str = ""
         f"latest: {last[1]:g} on {last[0]}; first: {first[1]:g} on {first[0]}; {change}",
         f"high {hi[1]:g} on {hi[0]}; low {lo[1]:g} on {lo[0]}; mean {sum(vals) / len(vals):.4g}",
     ]
+    changes = [(series[i][0], series[i - 1][1], series[i][1]) for i in range(1, len(series))
+               if series[i][1] != series[i - 1][1]]
+    if len(series) > max_rows and len(changes) <= 40:
+        # a step series (policy rates, target ranges): every change is the information, not a sample
+        lines.append(f"{len(changes)} change(s) in this period (date: from -> to):")
+        lines += [f"  {d}: {a:g} -> {b:g}" for d, a, b in changes]
+        if "target" in name.lower() or "DFEDTAR" in name:
+            lines.append("(dates are effective dates: a change to the target range takes effect the day after the "
+                         "FOMC decision, e.g. a September 16 decision appears on September 17)")
+        return "\n".join(lines)
     step = max(1, math.ceil(len(series) / max_rows))
     sampled = series[::step]
     if sampled[-1] != last:

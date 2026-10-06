@@ -8,8 +8,8 @@ from . import prompts
 from .base import AgentResult
 from .planner import TASK_SCHEMA
 
-MAX_EVIDENCE_ITEMS = 28
-EVIDENCE_CHARS = 1800
+MAX_EVIDENCE_ITEMS = 40  # enough for a table over every meeting of a year
+EVIDENCE_CHARS = 1600
 
 
 def select_evidence(results: list[AgentResult], store: EvidenceStore) -> list[str]:
@@ -62,7 +62,7 @@ async def revise(llm: LLM, question: str, today: str, draft: str, issues: list[s
 
 
 async def direct_answer(llm: LLM, question: str, today: str, history_note: str = "", on_delta=None,
-                        n_docs: int = 391, n_tables: int = 846) -> str:
+                        n_docs: int = 725, n_tables: int = 978) -> str:
     system = prompts.DIRECT.format(today=today, n_docs=n_docs, n_tables=n_tables)
     r = await llm.chat([{"role": "system", "content": system},
                         {"role": "user", "content": f"{history_note}{question}"}],

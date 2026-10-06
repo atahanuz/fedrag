@@ -27,12 +27,13 @@ PLAN_SCHEMA = {
     "properties": {
         "standalone_question": {"type": "string"},
         "reasoning": {"type": "string"},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
         "intent": {"type": "string",
                    "enum": ["fed_documents", "live_data", "web", "general_knowledge", "mixed", "conversational"]},
         "needs_tools": {"type": "boolean"},
         "tasks": {"type": "array", "items": TASK_SCHEMA},
     },
-    "required": ["standalone_question", "reasoning", "intent", "needs_tools", "tasks"],
+    "required": ["standalone_question", "reasoning", "assumptions", "intent", "needs_tools", "tasks"],
     "additionalProperties": False,
 }
 
@@ -69,6 +70,17 @@ Q: What did Chairman Warsh say about forward guidance at Jackson Hole in August 
 Q: What happens to house prices in the 2026 stress test's severely adverse scenario?
 -> intent fed_documents; tasks: [fed_research: "2026 Supervisory Stress Test Scenarios document: the severely adverse
    scenario's path for house prices and commercial real estate prices (published peak-to-trough declines)."]
+Q: What does the Fed say about commercial real estate?
+-> intent fed_documents; assumptions []; tasks (parallel): [fed_research: "Official assessments of commercial real
+   estate (CRE) in the latest Financial Stability Report and Supervision and Regulation Report, and in the
+   latest FOMC minutes and Chair's press conference", fed_research: "Governors' speeches and FEDS Notes from
+   2025-2026 that discuss CRE: each one's main point", data_analyst: "CRE price paths in the 2026 stress test
+   scenarios"] (official voices first, then individual views and research, then data)
+Q: How did the FOMC's description of inflation change over 2025?
+-> intent fed_documents; tasks: [fed_research: "Every FOMC statement of 2025 (8 meetings): the inflation
+   sentence of each, using search_each_document", data_analyst: "SEP median PCE inflation projections for 2025
+   at each 2025 meeting", fed_research: "The Chair's 2025 press conferences: how he characterized inflation and
+   tariffs, with dates"]
 Q: What is quantitative tightening?   -> intent general_knowledge; needs_tools false; tasks []
 Q: thanks!                            -> intent conversational; needs_tools false; tasks []"""
 
@@ -88,10 +100,11 @@ class Plan:
     intent: str
     needs_tools: bool
     tasks: list[Task]
+    assumptions: list[str] = field(default_factory=list)  # how an underspecified question was read
 
     def as_dict(self) -> dict:
         return {"standalone_question": self.standalone_question, "reasoning": self.reasoning,
-                "intent": self.intent, "needs_tools": self.needs_tools,
+                "assumptions": self.assumptions, "intent": self.intent, "needs_tools": self.needs_tools,
                 "tasks": [t.__dict__ for t in self.tasks]}
 
 
@@ -107,10 +120,12 @@ def _history_block(history: list[dict] | None, max_turns: int = 3) -> str:
 
 
 async def make_plan(llm: LLM, question: str, today: str, corpus_card: str, history: list[dict] | None = None,
-                    dataset_card: str = "", n_docs: int = 0, n_tables: int = 0) -> Plan:
+                    dataset_card: str = "", n_docs: int = 0, n_tables: int = 0, related: str = "") -> Plan:
     system = prompts.PLANNER.format(today=today, corpus_card=corpus_card, dataset_card=dataset_card, n_docs=n_docs,
                                     n_tables=n_tables) + "\n\n" + EXAMPLES
-    user = f"{_history_block(history)}New user question: {question}\n\nReturn the plan as JSON."
+    related = (f"Documents of the collection most related to the question (a quick search; not exhaustive, "
+               f"and possibly irrelevant for live-data or general questions):\n{related}\n\n") if related else ""
+    user = f"{_history_block(history)}{related}New user question: {question}\n\nReturn the plan as JSON."
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     try:
         data = await llm.chat_json(messages, PLAN_SCHEMA, agent="planner", schema_name="plan", temperature=0.2,
@@ -134,6 +149,7 @@ async def make_plan(llm: LLM, question: str, today: str, corpus_card: str, histo
     for t in tasks:
         t.depends_on = [d for d in t.depends_on if d in ids and d != t.id]
     needs = bool(data.get("needs_tools")) and bool(tasks)
+    assumptions = [str(a).strip() for a in data.get("assumptions") or [] if str(a).strip()][:4]
     return Plan(standalone_question=data.get("standalone_question") or question,
                 reasoning=data.get("reasoning", ""), intent=data.get("intent", "mixed"),
-                needs_tools=needs, tasks=tasks if needs else [])
+                needs_tools=needs, tasks=tasks if needs else [], assumptions=assumptions)

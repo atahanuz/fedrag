@@ -86,6 +86,11 @@ EXAMPLES = [
     {"level": "complex", "tag": "Comparison over time",
      "question": "How did the Beige Book's national summary of labor markets change between January 2026 and "
                  "September 2026?"},
+    {"level": "complex", "tag": "Every meeting of a year",
+     "question": "Who dissented at each FOMC meeting in 2025, and what did each dissenter prefer?"},
+    {"level": "complex", "tag": "Broad, many sources",
+     "question": "What does the Federal Reserve say about artificial intelligence?"},
+    {"level": "complex", "tag": "Ambiguous", "question": "Who dissented?"},
     {"level": "complex", "tag": "Three sources",
      "question": "How does today's fed funds target range compare with the July 2026 decision, what did the "
                  "September 2026 SEP project for the end of 2026, and how has the 2-year Treasury yield moved "

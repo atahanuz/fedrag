@@ -165,6 +165,52 @@ class CorpusIndex:
                 log.warning("rerank unavailable (%s); using fused ranking", e)
         return hits[:k]
 
+    async def related_docs(self, query: str, k: int = 12) -> list[tuple[dict, dict]]:
+        """The documents most related to a question, best first, each with its best passage (for planning)."""
+        hits = await self.search(query, k=60, candidates=60, kinds=["text"])
+        out: dict[str, tuple[dict, dict]] = {}
+        for h in hits:
+            out.setdefault(h.chunk["doc_id"], (self.docs[h.chunk["doc_id"]], h.chunk))
+        return list(out.values())[:k]
+
+    async def search_per_doc(self, query: str, doc_ids: list[str], per_doc: int = 2, pool: int = 5,
+                             kinds: list[str] | None = None) -> dict[str, list[Hit]]:
+        """The best passages of EACH listed document for one query: candidates are ranked within every
+        document (RRF of its BM25 and dense ranks), then all of them are reranked in one call. Used to
+        read the same thing from a set of documents (each 2024 Beige Book, every FOMC statement of 2025)."""
+        allowed = np.flatnonzero(self.mask(doc_ids=doc_ids, kinds=kinds))
+        if not len(allowed):
+            return {}
+        bm = self.bm25.scores(query)[allowed]
+        qv = await self._query_vec(query)
+        ds = self.emb[allowed] @ qv if qv is not None else None
+        positions: dict[str, list[int]] = defaultdict(list)
+        for j, i in enumerate(allowed):
+            positions[self.chunks[i]["doc_id"]].append(j)
+        hits: list[Hit] = []
+        for doc, js in positions.items():
+            arr = np.array(js)
+            fused: dict[int, float] = defaultdict(float)
+            for r, j in enumerate(arr[np.argsort(-bm[arr])]):
+                fused[int(j)] += 1.0 / (RRF_K + r)
+            if ds is not None:
+                for r, j in enumerate(arr[np.argsort(-ds[arr])]):
+                    fused[int(j)] += 1.0 / (RRF_K + r)
+            for j in sorted(fused, key=fused.get, reverse=True)[:pool]:
+                hits.append(Hit(chunk=self.chunks[allowed[j]], score=fused[j]))
+        if self.gpu is not None and hits:
+            try:
+                scores = await self.gpu.rerank(query, [rerank_text(h.chunk) for h in hits])
+                for h, sc in zip(hits, scores):
+                    h.rerank = h.score = sc
+            except GPUUnavailable as e:
+                log.warning("rerank unavailable (%s); using fused ranking", e)
+        out: dict[str, list[Hit]] = defaultdict(list)
+        for h in sorted(hits, key=lambda h: h.score, reverse=True):
+            if len(out[h.chunk["doc_id"]]) < per_doc:
+                out[h.chunk["doc_id"]].append(h)
+        return dict(out)
+
     # ------------------------------------------------------------------ navigation
     def get_chunk(self, chunk_id: str) -> dict | None:
         i = self.chunk_idx.get(chunk_id)
