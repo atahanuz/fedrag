@@ -1,5 +1,6 @@
 # FedRAG: agentic research over the Federal Reserve's documents
 
+[![tests](https://github.com/atahanuz/fedrag/actions/workflows/tests.yml/badge.svg)](https://github.com/atahanuz/fedrag/actions/workflows/tests.yml)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![vLLM](https://img.shields.io/badge/served%20with-vLLM-7c3aed)
 ![Open-weight models](https://img.shields.io/badge/models-open--weight%2C%20self--hosted-0f766e)
@@ -113,7 +114,7 @@ GPU.
 | External data | FRED, ECB (Frankfurter), Yahoo Finance, DuckDuckGo and trafilatura |
 | App | FastAPI with NDJSON streaming; vanilla-JS single-page app (SVG graph, timeline, no build step) |
 | Infrastructure | Colab A100 80GB, FastAPI gateway (auth, embeddings, rerank, LLM proxy), Cloudflare tunnel, keep-alive |
-| Quality | 65 offline pytest tests, ruff, LLM-as-judge evaluation harness |
+| Quality | 65 offline pytest tests, ruff, GitHub Actions on Python 3.11 and 3.12, LLM-as-judge evaluation harness |
 
 ## Engineering notes
 
