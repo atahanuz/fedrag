@@ -61,8 +61,9 @@ kernel is still booting. Just retry.
 
 ### The patch
 
-Applied to `/Users/atahanuz/miniconda3/lib/python3.12/site-packages/colab_cli/client.py`.
-A pristine copy is saved beside it as `client.py.orig`.
+Applied to `colab_cli/client.py` in the Python environment that runs `colab` (find it with
+`python -c "import colab_cli.client as c; print(c.__file__)"`). A pristine copy is saved beside
+it as `client.py.orig`.
 
 Add `os` to the imports, then in `Client._build_assign_url`:
 
@@ -81,7 +82,8 @@ generated URL is byte-identical to stock, so nothing else changes.
 To revert:
 
 ```bash
-cp /Users/atahanuz/miniconda3/lib/python3.12/site-packages/colab_cli/client.py{.orig,}
+F=$(python -c "import colab_cli.client as c; print(c.__file__)")
+cp "$F.orig" "$F"
 ```
 
 ### ⚠️ Upgrading silently breaks this

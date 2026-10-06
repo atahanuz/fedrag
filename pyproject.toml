@@ -2,7 +2,11 @@
 name = "fedrag"
 version = "0.1.0"
 description = "Agentic RAG over a mixed-format Federal Reserve collection (PDF, web, Word, Excel, CSV) with SQL, web search and live market-data agents"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Atahan Uz"}]
 requires-python = ">=3.11"
+keywords = ["rag", "agentic-rag", "multi-agent", "llm", "text-to-sql", "hybrid-search", "vllm", "federal-reserve"]
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",
@@ -31,6 +35,9 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 [project.scripts]
 fedrag = "fedrag.cli:main"
 
+[project.urls]
+Repository = "https://github.com/atahanuz/fedrag"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -41,3 +48,9 @@ include = ["fedrag*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]  # pyflakes and the basic pycodestyle errors
