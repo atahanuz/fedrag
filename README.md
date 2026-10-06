@@ -145,9 +145,9 @@ Problems found in measurement and how they were fixed. Each one is written up in
 git clone https://github.com/atahanuz/fedrag && cd fedrag
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[ui,dev]"
 
-.venv/bin/python scripts/fetch_corpus.py          # download the 725 source files (269 MB, SHA-256 checked)
-.venv/bin/python -m fedrag.ingest.build_corpus    # parse into pages, chunks and 978 SQL tables (~20 s)
-.venv/bin/python scripts/colab_up.py              # GPU backend on a Colab A100 (LLM, embedder, reranker)
+.venv/bin/python scripts/fetch_corpus.py          # the 725 source files, 269 MB
+.venv/bin/python -m fedrag.ingest.build_corpus    # pages, chunks, 978 SQL tables
+.venv/bin/python scripts/colab_up.py              # GPU backend on a Colab A100
 
 .venv/bin/python -m fedrag ask "What did the FOMC decide in July 2026, and who dissented?"
 .venv/bin/python -m fedrag ui                     # the pipeline explorer
@@ -172,12 +172,16 @@ local vLLM server. Search then uses BM25 only, because the embedder and reranker
 ## Repository layout
 
 ```
-fedrag/        the package: ingest/ (parsers, table engine, chunker), retrieval/ (hybrid search, SQL),
-               tools/, agents/ (planner, specialists, writer, verifier), orchestrator.py, cli.py, ui/
-gpu_server/    vLLM launcher, FastAPI gateway (auth, embeddings, rerank, LLM proxy), keep-alive
-scripts/       collection download, Colab bring-up, LLM switching, session heartbeat
-eval/          question sets, evaluation runner and LLM judge, run comparison, committed results
-tests/         offline unit tests
+fedrag/          the package
+  ingest/        one parser per format, the table engine, chunking
+  retrieval/     hybrid search, document sets, the SQL sandbox
+  tools/         the agents' 19 tools
+  agents/        planner, specialist agents, writer, fact-checker
+  ui/            the pipeline explorer (FastAPI server and single-page app)
+gpu_server/      vLLM launcher, gateway (auth, embeddings, rerank, LLM proxy), keep-alive
+scripts/         collection download, Colab bring-up, LLM switching, session heartbeat
+eval/            question sets, evaluation runner with LLM judge, run comparison, results
+tests/           offline unit tests
 ```
 
 ## License
