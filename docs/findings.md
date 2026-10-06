@@ -189,3 +189,99 @@ Jackson Hole speech, the MPR and the FSRs were now in the plan).
 - **The gateway's memory grows.** After the heavy runs, the embedder and reranker held 31 GB instead of
   24 GB (PyTorch keeps the cache of the large rerank batches of `search_each_document`), and a vLLM restart
   failed for lack of 0.4 GB. `launch.py --restart-llm` now restarts the gateway first.
+
+### Final comparison: the old and the new pipeline, side by side
+
+Protocol: the old pipeline (frozen copy of the code before this work, with only the corrected coverage
+descriptions) and the new one (commit `3133578`) ran at the same time on the same GPU, with the same
+gateway and vLLM settings (keep-alive, no-whitespace JSON), two questions each, so both saw the same load.
+Both were judged by the same judge with the same final references.
+
+Pair A (`run_20261006-054452_final_base_A`, `run_20261006-055416_final_new_A`):
+
+| | Old pipeline | New pipeline |
+| --- | ---: | ---: |
+| Multi-source fully correct | 4 / 8 | 6 / 8 |
+| Ambiguous | 5 / 8 | 6 / 8 |
+| Broad | 2 / 8 | 4 / 8 |
+| **All 24** | **11 (46%)** | **16 (67%)** |
+| Mean score | 0.71 | 0.83 |
+| Documents cited per answer | 8.2 | 11.1 |
+| Tool calls per question | 14.6 | 26.2 |
+| Median time | 177 s | 242 s |
+
+Nine questions improved and two got worse. The new pipeline reads more (26 tool calls against 15) and is
+slower on narrow questions; on broad questions both took about 330 s at the median.
+
+One of the two regressions shows a remaining gap: for "Who dissented?" the planner took "the most recent
+meeting" to be April 2026 (four dissents) instead of September 2026: the related-documents search for a
+three-word question surfaced April's documents, and the latest meeting date was buried in a long list of
+dates. The collection card given to the planner and the document agent now starts with the most recent
+document of each type ("FOMC meeting 2026-09-16; FOMC minutes 2026-07-29; Beige Book 2026-09-02; ...").
+This change came after the final runs and is not part of the measured version.
+
+Pair B (`final_hard_old_b`, `final_hard_new_b`) ran four questions per system at once while another
+check ran, so the GPU served about ten questions at a time (median 700 s); its times are not comparable
+with pair A. The new pipeline scored 11 and the old one 12. One answer of the new pipeline failed because
+an agent's conversation passed the 65,536-token context of the model (the stablecoin question, after
+reading many speeches whole).
+
+**Both pairs together** (`eval/results/final_hard_comparison.summary.json`):
+
+| | Old pipeline | New pipeline |
+| --- | ---: | ---: |
+| Fully correct (runs A / B) | 11 / 12 of 24 | 16 / 11 of 24 |
+| Fully correct, both runs | 23 / 48 (48%) | **27 / 48 (56%)** |
+| Mean score | 0.72 | **0.77** |
+| Multi-source, mean score | 0.75 | 0.81 |
+| Ambiguous, mean score | 0.75 | 0.84 |
+| Broad, mean score | 0.66 | 0.66 |
+| Documents cited per answer | 8.4 | 10.7 |
+| Tool calls / LLM calls per question | 14.9 / 10.8 | 24.4 / 15.1 |
+| Prompt tokens per question | 135k | 199k |
+
+Over all runs of the new pipeline's last versions (v3, A, B: 16, 16, 11) and of the old one (the first
+baseline, A, B: 11, 11, 12), the averages are 60% and 47%.
+
+On the original 52 questions the new pipeline scored 46 of 52 (89%, mean 0.94, routing 52/52)
+(`final_agentic_725docs.jsonl`), against 47 and 48 for the old pipeline on the 391-document collection:
+no regression beyond run-to-run noise. Its median time rose from about 66 s to 88 s.
+
+### Conclusions
+
+- **What worked: reading every member of a set and stating interpretations.** The gains are in the
+  multi-source and ambiguous questions, and they are consistent where the mechanism applies: the 2024 Beige
+  Books, the dissents at each 2025 meeting and the current-rate question were right in every run of the new
+  pipeline and wrong in every run of the old one.
+- **Broad questions did not improve on average.** Their scores swung between runs (4, 4, 1 of 8 for the
+  new pipeline; 3, 2, 3 for the old), because the judge scores them against a rubric of many specific
+  points and both pipelines cover a different subset each time. Eight questions per group cannot separate
+  a real gain of one question from noise; more questions and repeated runs would be needed.
+- **The price is cost.** The new pipeline makes 60% more tool calls and sends 45% more prompt tokens; on a
+  shared GPU that is latency. On narrow questions it is slower for little gain.
+- **Infrastructure mattered as much as prompts.** The Cloudflare 524 timeouts and the JSON whitespace
+  runaway (which also hit Qwen) cost minutes per question before they were fixed, and the run that ignored
+  them (the first baseline, 8 timeouts) gave the same accuracy but much longer times.
+- **The judge is part of the measurement.** Several zeros and ones on inspection were faithful answers
+  marked down (an exact quote of conflicting sources; a correct answer phrased differently from the
+  reference). The references were corrected once (the inflation question) and all final runs used the
+  same references.
+
+### Follow-up fixes (after the measured version)
+
+Found in the final runs and fixed afterwards; checked on the affected questions only
+(`final_hard_followup_*.jsonl`):
+
+- **Which meeting is the latest.** The collection card now opens with the most recent document of each
+  type. "Who dissented?" then resolved to September 2026 in both checks (it had picked April once).
+- **Named people.** Press-conference transcripts now carry their Chair as speaker and in the title ("Chair
+  Powell's FOMC press conference, April 29, 2026"), so a speaker filter finds a Chair's press conferences
+  with his speeches; the planner is told not to assume a person's current role. "What has Powell said
+  recently about inflation?" went from 0 to 1 (it now finds the April 2026 press conference).
+- **Context overflow.** When an agent's conversation passes about 150,000 characters, its oldest tool
+  results are shortened to their first lines and their evidence IDs (the writer still reads the full
+  passages). The stablecoin question that had failed with a context-length error finished with 15 results
+  shortened.
+- **Known open issues**: the writer sometimes computes a figure itself despite the rule (a cumulative
+  change given as 2.8 instead of 4.4 points), which the fact-checker missed; and the broad questions need a
+  larger question set before further tuning.

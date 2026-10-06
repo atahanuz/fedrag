@@ -110,3 +110,9 @@ def test_interpretation_reaches_the_writer(monkeypatch):
     plan_event = next(e for e in res.trace if e["type"] == "plan")
     assert plan_event["data"]["assumptions"] == ["'last meeting' = September 15-16, 2026"]
     assert json.dumps(res.to_dict())  # serializable for the explorer and the eval files
+
+
+def test_latest_card_names_the_most_recent_documents(ctx):
+    card = ctx.index.latest_card()
+    assert "FOMC meeting (statement, SEP, press conference) 2026-09-16" in card and "FOMC minutes 2026-07-29" in card
+    assert ctx.index.corpus_card().startswith("MOST RECENT")

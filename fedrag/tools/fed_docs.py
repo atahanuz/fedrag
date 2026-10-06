@@ -311,7 +311,7 @@ def make_fed_tools() -> list[Tool]:
                 "date_from": {"type": "string", "description": "YYYY-MM-DD / YYYY-MM / YYYY"},
                 "date_to": {"type": "string", "description": "YYYY-MM-DD / YYYY-MM / YYYY"},
                 "title_contains": {"type": "string", "description": "Case-insensitive title substring"},
-                "speaker": {"type": "string", "description": "Speeches/testimony by this person, e.g. 'Waller'"},
+                "speaker": {"type": "string", "description": "Speeches, testimony and (for a Chair) press conferences by this person, e.g. 'Waller', 'Powell'"},
             }),
             list_fed_documents,
         ),

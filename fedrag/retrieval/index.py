@@ -247,6 +247,23 @@ class CorpusIndex:
             out.append(d)
         return sorted(out, key=lambda d: d["sort_date"])
 
+    LATEST = (("fomc_statement", "FOMC meeting (statement, SEP, press conference)"), ("meeting_minutes", "FOMC minutes"),
+              ("economic_conditions_report", "Beige Book"), ("monetary_policy_report", "Monetary Policy Report"),
+              ("financial_stability_report", "Financial Stability Report"),
+              ("supervisory_report", "Supervision and Regulation Report"), ("loan_officer_survey", "SLOOS"),
+              ("speech", "speech"), ("testimony", "testimony"), ("feds_note", "FEDS Note"),
+              ("press_release", "press release"))
+
+    def latest_card(self) -> str:
+        """The most recent document of each main type: what 'the last meeting', 'the latest report' refer to."""
+        out = []
+        for t, label in self.LATEST:
+            ds = [d for d in self.docs.values() if d["doc_type"] == t and "longer_run" not in d["doc_id"]]
+            if ds:
+                out.append(f"{label} {max(ds, key=lambda d: d['sort_date'])['date']}")
+        return ("MOST RECENT in the collection (what 'last', 'latest', 'current' refer to): " + "; ".join(out) +
+                ". Minutes appear about three weeks after their meeting, so the latest meeting may have no minutes yet.")
+
     def corpus_card(self) -> str:
         """Compact description of the collection for agent prompts: what exists, in which format, when."""
         by_type: dict[str, list[dict]] = defaultdict(list)
@@ -259,7 +276,12 @@ class CorpusIndex:
             ds.sort(key=lambda d: d["sort_date"])
             fmts = "/".join(sorted({d.get("format", "pdf") for d in ds}))
             head = f"- {t} ({ds[0]['series']}, {len(ds)} {fmts})"
-            if t in dated:
+            if t == "press_conference":
+                who: dict[str, list[str]] = defaultdict(list)
+                for d in ds:
+                    who[d.get("speaker") or "?"].append(d["date"])
+                lines.append(f"{head}: " + "; ".join(f"{k} {v[0]} to {v[-1]} ({len(v)})" for k, v in who.items()))
+            elif t in dated:
                 lines.append(f"{head}: " + ", ".join(d["date"] for d in ds))
             elif t == "fomc_statement":
                 stm = [d["date"] for d in ds if "longer_run" not in d["doc_id"]]
@@ -283,7 +305,7 @@ class CorpusIndex:
                     parts.append(f"+ {len(data)} data files ({', '.join(sorted({d['format'] for d in data}))}) "
                                  "for the data_analyst")
                 lines.append(f"{head}: " + "; ".join(parts))
-        return "\n".join(lines)
+        return self.latest_card() + "\n" + "\n".join(lines)
 
     def dataset_card(self) -> str:
         """The main datasets (data files and stacked views) for the data agent and the planner."""

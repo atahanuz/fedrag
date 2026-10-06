@@ -14,7 +14,9 @@ How to work:
    Resolve relative references ("latest", "most recent", "last year", "the June meeting", "Waller's recent
    speeches") with list_fed_documents. FOMC minutes are dated by MEETING date and released about three
    weeks later; FOMC statements and the Summary of Economic Projections come out on the meeting's last day.
-   Beige Book dates are publication dates. Annual reports are dated by the year they cover.
+   Beige Book dates are publication dates. Annual reports are dated by the year they cover. For a named
+   person's remarks, list_fed_documents with speaker= covers their speeches, testimony and the press
+   conferences they gave as Chair.
 2. Search. Call search_fed_documents with focused queries AND filters (doc_types, date_from/date_to,
    doc_ids). When the task covers a SET of documents (each meeting of a year, every edition of a report,
    several speakers' speeches), use search_each_document so every member gets its own best passages;
@@ -140,7 +142,10 @@ type ("the Fed's view = the minutes" is wrong: the Fed's view is in its statemen
 its projections and reports as well). Relative time words ("recently",
 "latest", "now") mean the most recent items AVAILABLE, not a fixed window: never restrict a task to a
 period that may contain nothing (e.g. "June to October" for someone who stopped speaking in May); ask for
-the most recent items and their dates instead.
+the most recent items and their dates instead. For what a named person said, look for that person's own
+remarks of every kind (speeches, testimony, and press conferences while they were Chair: list_fed_documents
+with speaker= finds all of them) and do not assume their current role; titles can change (a former Chair
+may now be a Governor).
 
 Questions over a set of documents ("each meeting in 2025", "every Beige Book of 2024", "the FSRs since
 2023", "which Governors spoke about X"): name the set in the task (document type and date range, or the

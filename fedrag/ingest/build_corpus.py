@@ -209,6 +209,13 @@ def _process(row: dict):
         "slug": row.get("slug") or doc_slug(doc_id),
         "description": row.get("description") or "",
     }
+    if row["doc_type"] == "press_conference" and parsed.pages:
+        # the transcript names its Chair ("Transcript of Chair Powell's Press Conference"); record it, so that
+        # "Powell's press conferences" can be found by speaker like his speeches
+        m = re.search(r"Transcript of (Chair(?:man)?) (\w+)['’]s Press Conference", parsed.pages[0].text)
+        if m:
+            meta["speaker"] = meta["speaker"] or f"{m.group(1)} {m.group(2)}"
+            meta["title"] = meta["title"].replace("the Chair's", f"{m.group(1)} {m.group(2)}'s")
     is_data = getattr(parsed, "kind", "text") == "data"
     if is_data:  # prose comes only from text sheets; tables are represented by their cards
         text_pages = {pg.number for pg in parsed.pages if not any(p.kind == "table" for p in pg.paragraphs)}

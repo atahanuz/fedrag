@@ -182,3 +182,18 @@ def test_step_series_summary_lists_every_change():
     assert "2 change(s)" in text and "2025-09-18: 4.25 -> 4" in text and "2025-10-28: 4 -> 3.75" in text
     noisy = [((d0 + dt.timedelta(days=i)).isoformat(), 4 + (i % 7) / 100) for i in range(400)]
     assert "observations (sampled)" in _summarize_series("FRED DGS2", noisy, is_rate=True)
+
+
+def test_old_tool_results_are_shortened_when_the_context_fills_up():
+    from fedrag.agents.base import compact_tool_results
+
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "task"}]
+    for i in range(8):
+        msgs.append({"role": "assistant", "content": ""})
+        msgs.append({"role": "tool", "tool_call_id": str(i), "content": f"[D{i + 1}] result {i}\n" + "x" * 30_000})
+    assert compact_tool_results(msgs, budget=150_000) > 0
+    tools = [m["content"] for m in msgs if m["role"] == "tool"]
+    assert "shortened to save context; evidence IDs in this result: D1" in tools[0]
+    assert all(len(t) > 30_000 for t in tools[-4:])  # the newest results stay whole
+    assert sum(len(str(m["content"])) for m in msgs) <= 150_000
+    assert compact_tool_results(msgs, budget=150_000) == 0  # nothing left to do

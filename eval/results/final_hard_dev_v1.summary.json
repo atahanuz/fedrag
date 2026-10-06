@@ -1,0 +1,50 @@
+{
+  "overall": {
+    "n": 24,
+    "routing_acc": 1.0,
+    "correct_rate": 0.583,
+    "mean_score": 0.771,
+    "cited_rate": 1.0,
+    "median_seconds": 247.6,
+    "mean_docs_cited": 9.5,
+    "mean_llm_calls": 14.8,
+    "mean_tool_calls": 22.7
+  },
+  "by_category": {
+    "multi_source": {
+      "n": 8,
+      "routing_acc": 1.0,
+      "correct_rate": 0.75,
+      "mean_score": 0.875,
+      "cited_rate": 1.0,
+      "median_seconds": 262.6,
+      "mean_docs_cited": 11.4,
+      "mean_llm_calls": 12.4,
+      "mean_tool_calls": 18.2
+    },
+    "ambiguous": {
+      "n": 8,
+      "routing_acc": 1.0,
+      "correct_rate": 0.625,
+      "mean_score": 0.75,
+      "cited_rate": 1.0,
+      "median_seconds": 160.7,
+      "mean_docs_cited": 4.6,
+      "mean_llm_calls": 11.5,
+      "mean_tool_calls": 12.5
+    },
+    "broad": {
+      "n": 8,
+      "routing_acc": 1.0,
+      "correct_rate": 0.375,
+      "mean_score": 0.688,
+      "cited_rate": 1.0,
+      "median_seconds": 541.5,
+      "mean_docs_cited": 12.5,
+      "mean_llm_calls": 20.4,
+      "mean_tool_calls": 37.2
+    }
+  },
+  "model": "qwen3.8-27b",
+  "judge_model": "qwen3.8-27b"
+}

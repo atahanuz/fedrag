@@ -1,0 +1,138 @@
+{
+  "overall": {
+    "n": 52,
+    "routing_acc": 1.0,
+    "correct_rate": 0.885,
+    "mean_score": 0.942,
+    "cited_rate": 1.0,
+    "median_seconds": 88.1,
+    "mean_docs_cited": 2.8,
+    "mean_llm_calls": 8.5,
+    "mean_tool_calls": 7.0
+  },
+  "by_category": {
+    "fed_docs": {
+      "n": 10,
+      "routing_acc": 1.0,
+      "correct_rate": 0.9,
+      "mean_score": 0.95,
+      "cited_rate": 1.0,
+      "median_seconds": 121.3,
+      "mean_docs_cited": 1.6,
+      "mean_llm_calls": 9.8,
+      "mean_tool_calls": 8.5
+    },
+    "fed_docs_compare": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 0.75,
+      "mean_score": 0.875,
+      "cited_rate": 1.0,
+      "median_seconds": 176.1,
+      "mean_docs_cited": 5.2,
+      "mean_llm_calls": 11.8,
+      "mean_tool_calls": 13.8
+    },
+    "live_data": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 37.9,
+      "mean_docs_cited": 1.5,
+      "mean_llm_calls": 5.5,
+      "mean_tool_calls": 2.2
+    },
+    "web": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 104.3,
+      "mean_docs_cited": 6.5,
+      "mean_llm_calls": 10.8,
+      "mean_tool_calls": 10.5
+    },
+    "mixed": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 146.8,
+      "mean_docs_cited": 3.8,
+      "mean_llm_calls": 11,
+      "mean_tool_calls": 12
+    },
+    "general": {
+      "n": 4,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": null,
+      "median_seconds": 20.1,
+      "mean_docs_cited": 0,
+      "mean_llm_calls": 2,
+      "mean_tool_calls": 0
+    },
+    "out_of_collection": {
+      "n": 2,
+      "routing_acc": 1.0,
+      "correct_rate": 0.5,
+      "mean_score": 0.75,
+      "cited_rate": 1.0,
+      "median_seconds": 96.8,
+      "mean_docs_cited": 3,
+      "mean_llm_calls": 7.5,
+      "mean_tool_calls": 4.5
+    },
+    "fed_data": {
+      "n": 9,
+      "routing_acc": 1.0,
+      "correct_rate": 0.889,
+      "mean_score": 0.944,
+      "cited_rate": 1.0,
+      "median_seconds": 61.9,
+      "mean_docs_cited": 3,
+      "mean_llm_calls": 7.8,
+      "mean_tool_calls": 6
+    },
+    "word": {
+      "n": 2,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 71.8,
+      "mean_docs_cited": 1.5,
+      "mean_llm_calls": 7,
+      "mean_tool_calls": 3.5
+    },
+    "web_pages": {
+      "n": 6,
+      "routing_acc": 1.0,
+      "correct_rate": 1.0,
+      "mean_score": 1.0,
+      "cited_rate": 1.0,
+      "median_seconds": 88.1,
+      "mean_docs_cited": 1.2,
+      "mean_llm_calls": 7.5,
+      "mean_tool_calls": 4
+    },
+    "cross_format": {
+      "n": 3,
+      "routing_acc": 1.0,
+      "correct_rate": 0.333,
+      "mean_score": 0.667,
+      "cited_rate": 1.0,
+      "median_seconds": 100.0,
+      "mean_docs_cited": 7,
+      "mean_llm_calls": 11.3,
+      "mean_tool_calls": 10
+    }
+  },
+  "model": "qwen3.8-27b",
+  "judge_model": "qwen3.8-27b"
+}

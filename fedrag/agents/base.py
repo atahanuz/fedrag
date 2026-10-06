@@ -57,6 +57,32 @@ class AgentResult:
                 f"Confidence: {self.confidence}" + (f"\nGaps: {self.gaps}" if self.gaps else ""))
 
 
+CONTEXT_BUDGET_CHARS = 150_000  # about 40k tokens: room under a 64k context for tools, schema and the reply
+
+
+def compact_tool_results(messages: list[dict], budget: int = CONTEXT_BUDGET_CHARS, keep_last: int = 4) -> int:
+    """Shorten the oldest tool results until the conversation fits the budget; the newest results stay whole.
+
+    The evidence IDs in a shortened result remain citable (the writer reads the full passages from the
+    evidence store); the agent keeps the first lines, which name what each result was. Returns the number
+    of results shortened."""
+    size = sum(len(str(m.get("content") or "")) for m in messages)
+    tool_idx = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    n = 0
+    for i in tool_idx[:-keep_last] if len(tool_idx) > keep_last else []:
+        if size <= budget:
+            break
+        text = str(messages[i]["content"])
+        if len(text) <= 900:
+            continue
+        ids = " ".join(dict.fromkeys(cited_ids(text)))
+        short = text[:600] + f"\n[... shortened to save context; evidence IDs in this result: {ids or 'none'}]"
+        size -= len(text) - len(short)
+        messages[i] = {**messages[i], "content": short}
+        n += 1
+    return n
+
+
 class ToolAgent:
     def __init__(self, name: str, system_prompt: str, tools: list[Tool], *, max_steps: int = 8,
                  thinking: bool = False, temperature: float = 0.3, max_tokens: int = 3000):
@@ -98,6 +124,10 @@ class ToolAgent:
                 if last:
                     messages.append({"role": "user", "content": "Step budget reached. Call submit_findings now "
                                                                 "with what you have (state gaps honestly)."})
+                shortened = compact_tool_results(messages)
+                if shortened:
+                    ctx.trace.emit(self.name, "info", task_id=task_id,
+                                   message=f"shortened {shortened} older tool result(s) to stay within the context")
                 resp = await ctx.llm.chat(
                     messages, agent=self.name, tools=specs,
                     tool_choice={"type": "function", "function": {"name": FINISH}} if last else "auto",

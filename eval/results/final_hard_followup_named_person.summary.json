@@ -1,0 +1,39 @@
+{
+  "overall": {
+    "n": 3,
+    "routing_acc": 1.0,
+    "correct_rate": 0.333,
+    "mean_score": 0.667,
+    "cited_rate": 1.0,
+    "median_seconds": 173.7,
+    "mean_docs_cited": 5.7,
+    "mean_llm_calls": 9.3,
+    "mean_tool_calls": 20.3
+  },
+  "by_category": {
+    "multi_source": {
+      "n": 1,
+      "routing_acc": 1.0,
+      "correct_rate": 0.0,
+      "mean_score": 0.5,
+      "cited_rate": 1.0,
+      "median_seconds": 232.1,
+      "mean_docs_cited": 4,
+      "mean_llm_calls": 11,
+      "mean_tool_calls": 39
+    },
+    "ambiguous": {
+      "n": 2,
+      "routing_acc": 1.0,
+      "correct_rate": 0.5,
+      "mean_score": 0.75,
+      "cited_rate": 1.0,
+      "median_seconds": 134.4,
+      "mean_docs_cited": 6.5,
+      "mean_llm_calls": 8.5,
+      "mean_tool_calls": 11
+    }
+  },
+  "model": "qwen3.8-27b",
+  "judge_model": "qwen3.8-27b"
+}

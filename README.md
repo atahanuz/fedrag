@@ -346,6 +346,55 @@ The development history, including the regressions found and fixed, is in the gi
 .venv/bin/python -m pytest -q                       # offline unit tests (parsers, table engine, SQL, tools)
 ```
 
+### Harder questions: many sources, ambiguous and broad (725-document collection)
+
+`eval/questions_hard.jsonl` adds 24 questions the first set barely tests: 8 that need many documents (the
+target range after each 2025 meeting, the dissents at each 2025 meeting, the overall activity in each of the
+eight 2024 Beige Books, asset valuations in seven FSRs, four Governors' stablecoin speeches), 8 ambiguous
+ones ("What did the Fed decide at its last meeting?", "What's the current interest rate?", "Who
+dissented?", "What has Powell said recently about inflation?") and 8 broad ones ("What are the Fed's main
+concerns right now?", "What does the Fed say about AI?", "How has policy evolved since 2023?"). The
+references were written from the documents; for ambiguous questions they name the acceptable readings,
+and for broad ones the points a good answer covers.
+
+```bash
+.venv/bin/python eval/run_eval.py --questions questions_hard.jsonl -c 4
+```
+
+The pipeline before and after this work (the old one frozen as it was), run side by side on the same GPU
+twice and judged with the same references:
+
+| | Before | After |
+| --- | ---: | ---: |
+| Fully correct (two runs) | 23 / 48 (48%) | **27 / 48 (56%)** |
+| Mean score: multi-source / ambiguous / broad | 0.75 / 0.75 / 0.66 | **0.81 / 0.84** / 0.66 |
+| Documents cited per answer | 8.4 | 10.7 |
+| Tool calls per question | 14.9 | 24.4 |
+| Original 52 questions | 47-48 / 52 (391 docs) | 46 / 52 (725 docs) |
+
+What changed, and what each change did (details and every run in [`docs/findings.md`](docs/findings.md)):
+
+- **Every member of a set is read**: `search_each_document` runs one query inside each document of a set
+  (each 2024 Beige Book: eight national summaries in 4.6 s), and ordinary search returns at most two
+  passages per document. The set questions that the old pipeline always got partly wrong (it dropped three
+  of eight Beige Books, the October meeting, three of seven FSRs) became right in every run.
+- **Ambiguity is stated, not guessed silently**: the planner records how it reads an underspecified
+  question, the writer says it first ("Taking 'the last meeting' to mean the September 15-16, 2026 FOMC
+  meeting: ..."), and the fact-checker checks it. Two lessons from the runs: a stated interpretation can be
+  wrong ("recently" read as a fixed window in which Powell had said nothing), and it must pick an item,
+  never narrow the question ("the Fed's view" read as "the minutes").
+- **Broad questions are planned from what the collection holds**: one search before planning lists the
+  documents most related to the question, and the planner covers the official voices (Committee, Chair,
+  Board reports) before Governors and research. Broad answers improved in some runs but not on average:
+  their scores swing by several questions between runs.
+- **Infrastructure**: slow LLM calls are kept alive through the Cloudflare tunnel (no 524 errors), every
+  model is served without free whitespace in JSON (Qwen, too, sometimes padded a plan with 2,000 spaces), a
+  FRED step series is summarized as its change points, and agents shorten their oldest tool results before
+  they overflow the context.
+
+The cost is more reading: 60% more tool calls and 45% more prompt tokens per question. The full log of
+measurements, failures and fixes is in [`docs/findings.md`](docs/findings.md).
+
 ### Model comparison: Qwen3.8-27B vs Gemma 4 31B (2026-10-05)
 
 The same pipeline (prompts, tools, retrieval, sampling settings) with `google/gemma-4-31B-it` as the LLM of
@@ -354,7 +403,8 @@ every agent, run twice on the 52 questions. Gemma ran in FP8 (quantized on load)
 whitespace until the token limit instead of closing them (the planner, the fact-checker and the forced
 "submit findings" call all hung), so it is served with `disable_any_whitespace`. Both systems were judged
 by the same judge (Qwen3.8-27B, thinking mode) against the same references; Gemma also judged all four
-runs as a cross-check.
+runs as a cross-check. (Qwen ran without the no-whitespace JSON setting that was added later; see
+[`docs/findings.md`](docs/findings.md).)
 
 | | Qwen3.8-27B (runs A / B) | Gemma 4 31B (runs A / B) |
 | --- | --- | --- |
@@ -431,9 +481,10 @@ gpu_server/      models.py, embed_corpus.py, gateway.py (FastAPI: auth, embeddin
 scripts/         fetch_corpus.py (discover + download the collection), colab_up.py (Colab bring-up),
                  switch_llm.py (serve another LLM on the running VM),
                  colab_keepalive.py (heartbeat + token refresh)
-eval/            questions.jsonl, run_eval.py, compare.py (runs side by side)
+eval/            questions.jsonl (52), questions_hard.jsonl (24 multi-source, ambiguous, broad),
+                 run_eval.py, compare.py (runs side by side)
 tests/           offline unit tests
-docs/            explorer.png (the screenshot above)
+docs/            explorer.png (the screenshot above), findings.md (log of measurements, failures and fixes)
 federal_reserve/ the source files (not in git; metadata.csv lists their URLs and hashes)
 ```
 
